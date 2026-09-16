@@ -1,0 +1,14 @@
+target/
+.git/
+.gitignore
+.DS_Store
+README.md
+HELP.md
+.mvn/
+.settings/
+.project
+.classpath
+*.log
+*.swp
+*.swo
+mvnw.cmd

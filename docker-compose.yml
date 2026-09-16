@@ -1,0 +1,123 @@
+version: '3.8'
+ 
+services:
+  # ============ MySQL Database ============
+  mysql:
+    image: mysql:8.0
+    container_name: bancocloud-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: bancocloud
+      MYSQL_ROOT_HOST: '%'
+      TZ: 'America/Argentina/Buenos_Aires'
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts-sql/00-init-databases.sql:/docker-entrypoint-initdb.d/00-init-databases.sql
+      - ./scripts-sql/01-populate-usuarios.sql:/docker-entrypoint-initdb.d/01-populate-usuarios.sql
+      - ./scripts-sql/02-populate-fondos.sql:/docker-entrypoint-initdb.d/02-populate-fondos.sql
+      - ./scripts-sql/03-populate-inversiones.sql:/docker-entrypoint-initdb.d/03-populate-inversiones.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+      interval: 10s
+    networks:
+      - bancocloud-network
+ 
+  # ============ Usuarios Service ============
+  usuarios-service:
+    build:
+      context: ./usuarios-service
+      dockerfile: Dockerfile
+    container_name: bancocloud-usuarios-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/usuarios_db?allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: bancocloud
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      LOGGING_LEVEL_COM_BANCOCLOUD_USUARIOS_SERVICE: DEBUG
+    ports:
+      - "8083:8083"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - bancocloud-network
+ 
+  # ============ BFF Service (API Gateway) ============
+  bff-service:
+    build:
+      context: ./bff-service
+      dockerfile: Dockerfile
+    container_name: bancocloud-bff-service
+    environment:
+      SERVER_PORT: 8090
+      JWT_SECRET: BancoCloud-Super-Secret-Key-Change-In-Production
+      JWT_EXPIRATION: 86400000
+      JWT_ISSUER: bancoclod
+      JWT_AUDIENCE: bancoclod-app
+      MICROSERVICES_USUARIOS_URL: http://usuarios-service:8083
+      MICROSERVICES_FONDOS_URL: http://fondos-service:8081
+      MICROSERVICES_INVERSIONES_URL: http://inversiones-service:8082
+      LOGGING_LEVEL_COM_BANCOCLOUD_BFF_SERVICE: DEBUG
+    ports:
+      - "8090:8090"
+    depends_on:
+      usuarios-service:
+        condition: service_started
+    networks:
+      - bancocloud-network
+ 
+  # ============ Fondos Service ============
+  fondos-service:
+    build:
+      context: ./fondos-service
+      dockerfile: Dockerfile
+    container_name: bancocloud-fondos-service
+    environment:
+      SERVER_PORT: 8081
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/fondos_db?allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: bancocloud
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "8081:8081"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - bancocloud-network
+ 
+  # ============ Inversiones Service ============
+  inversiones-service:
+    build:
+      context: ./inversiones-service
+      dockerfile: Dockerfile
+    container_name: bancocloud-inversiones-service
+    environment:
+      SERVER_PORT: 8082
+      FONDOS_SERVICE_URL: http://fondos-service:8081
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/inversiones_db?allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: bancocloud
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "8082:8082"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      fondos-service:
+        condition: service_started
+    networks:
+      - bancocloud-network
+ 
+# ============ Volumes ============
+volumes:
+  mysql_data:
+    driver: local
+ 
+# ============ Networks ============
+networks:
+  bancocloud-network:
+    driver: bridge

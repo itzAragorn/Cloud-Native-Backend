@@ -17,7 +17,7 @@ public class FondoServiceClient {
     
     private final RestTemplate restTemplate;
     
-    @Value("${fondos-service.url:http://localhost:8081}")
+    @Value("${FONDOS_SERVICE_URL:http://localhost:8081}")
     private String fondosServiceUrl;
     
     /**

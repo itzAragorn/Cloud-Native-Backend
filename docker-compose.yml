@@ -1,30 +1,6 @@
 version: '3.8'
- 
+
 services:
-  # ============ MySQL Database ============
-  mysql:
-    image: mysql:8.0
-    container_name: bancocloud-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: bancocloud
-      MYSQL_ROOT_HOST: '%'
-      TZ: 'America/Argentina/Buenos_Aires'
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./scripts-sql/00-init-databases.sql:/docker-entrypoint-initdb.d/00-init-databases.sql
-      - ./scripts-sql/01-populate-usuarios.sql:/docker-entrypoint-initdb.d/01-populate-usuarios.sql
-      - ./scripts-sql/02-populate-fondos.sql:/docker-entrypoint-initdb.d/02-populate-fondos.sql
-      - ./scripts-sql/03-populate-inversiones.sql:/docker-entrypoint-initdb.d/03-populate-inversiones.sql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
-      interval: 10s
-    networks:
-      - bancocloud-network
- 
   # ============ Usuarios Service ============
   usuarios-service:
     build:
@@ -32,43 +8,24 @@ services:
       dockerfile: Dockerfile
     container_name: bancocloud-usuarios-service
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/usuarios_db?allowPublicKeyRetrieval=true&useSSL=false
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: bancocloud
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      # AWS RDS Configuration - Separate URL for usuarios_db
+      DB_URL: ${USUARIOS_DB_URL}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      # Logging
       LOGGING_LEVEL_COM_BANCOCLOUD_USUARIOS_SERVICE: DEBUG
-    ports:
-      - "8083:8083"
-    depends_on:
-      mysql:
-        condition: service_healthy
+    expose:
+      - "8083"
     networks:
       - bancocloud-network
- 
-  # ============ BFF Service (API Gateway) ============
-  bff-service:
-    build:
-      context: ./bff-service
-      dockerfile: Dockerfile
-    container_name: bancocloud-bff-service
-    environment:
-      SERVER_PORT: 8090
-      JWT_SECRET: BancoCloud-Super-Secret-Key-Change-In-Production
-      JWT_EXPIRATION: 86400000
-      JWT_ISSUER: bancoclod
-      JWT_AUDIENCE: bancoclod-app
-      MICROSERVICES_USUARIOS_URL: http://usuarios-service:8083
-      MICROSERVICES_FONDOS_URL: http://fondos-service:8081
-      MICROSERVICES_INVERSIONES_URL: http://inversiones-service:8082
-      LOGGING_LEVEL_COM_BANCOCLOUD_BFF_SERVICE: DEBUG
-    ports:
-      - "8090:8090"
-    depends_on:
-      usuarios-service:
-        condition: service_started
-    networks:
-      - bancocloud-network
- 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 30s
+    restart: unless-stopped
+
   # ============ Fondos Service ============
   fondos-service:
     build:
@@ -76,19 +33,24 @@ services:
       dockerfile: Dockerfile
     container_name: bancocloud-fondos-service
     environment:
-      SERVER_PORT: 8081
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/fondos_db?allowPublicKeyRetrieval=true&useSSL=false
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: bancocloud
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
-    ports:
-      - "8081:8081"
-    depends_on:
-      mysql:
-        condition: service_healthy
+      # AWS RDS Configuration - Separate URL for fondos_db
+      DB_URL: ${FONDOS_DB_URL}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      # Logging
+      LOGGING_LEVEL_COM_BANCOCLOUD_FONDOS_SERVICE: DEBUG
+    expose:
+      - "8081"
     networks:
       - bancocloud-network
- 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 30s
+    restart: unless-stopped
+
   # ============ Inversiones Service ============
   inversiones-service:
     build:
@@ -96,27 +58,89 @@ services:
       dockerfile: Dockerfile
     container_name: bancocloud-inversiones-service
     environment:
-      SERVER_PORT: 8082
-      FONDOS_SERVICE_URL: http://fondos-service:8081
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/inversiones_db?allowPublicKeyRetrieval=true&useSSL=false
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: bancocloud
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
-    ports:
-      - "8082:8082"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      fondos-service:
-        condition: service_started
+      # AWS RDS Configuration - Separate URL for inversiones_db
+      DB_URL: ${INVERSIONES_DB_URL}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      # Fondos Service URL (use Docker service name in Docker, localhost for local dev)
+      FONDOS_SERVICE_URL: ${FONDOS_SERVICE_URL}
+      # Logging
+      LOGGING_LEVEL_COM_BANCOCLOUD_INVERSIONES_SERVICE: DEBUG
+    expose:
+      - "8082"
     networks:
       - bancocloud-network
- 
-# ============ Volumes ============
-volumes:
-  mysql_data:
-    driver: local
- 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============ BFF Service (API Gateway) ============
+  bff-service:
+    build:
+      context: ./bff-service
+      dockerfile: Dockerfile
+    container_name: bancocloud-bff-service
+    environment:
+      # AWS Cognito Configuration
+      COGNITO_ISSUER: ${COGNITO_ISSUER}
+      # Microservices URLs (use Docker service names)
+      FONDOS_SERVICE_URL: ${FONDOS_SERVICE_URL}
+      INVERSIONES_SERVICE_URL: ${INVERSIONES_SERVICE_URL}
+      USUARIOS_SERVICE_URL: ${USUARIOS_SERVICE_URL}
+      # CORS Configuration
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS}
+      # Logging
+      LOGGING_LEVEL_COM_BANCOCLOUD_BFF_SERVICE: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: DEBUG
+    ports:
+      - "8090:8090"
+    depends_on:
+      fondos-service:
+        condition: service_healthy
+      inversiones-service:
+        condition: service_healthy
+      usuarios-service:
+        condition: service_healthy
+    networks:
+      - bancocloud-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/v1/health"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============ Frontend (React + Nginx) ============
+  frontend:
+    build:
+      context: ../Cloud-Native-Front-end-main
+      dockerfile: Dockerfile
+      args:
+        # Pass VITE variables as build-time arguments
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_COGNITO_USER_POOL_ID: ${VITE_COGNITO_USER_POOL_ID}
+        VITE_COGNITO_USER_POOL_CLIENT_ID: ${VITE_COGNITO_USER_POOL_CLIENT_ID}
+        VITE_AWS_REGION: ${VITE_AWS_REGION}
+    container_name: bancocloud-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - bff-service
+    networks:
+      - bancocloud-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 20s
+    restart: unless-stopped
+
 # ============ Networks ============
 networks:
   bancocloud-network:

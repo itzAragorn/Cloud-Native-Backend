@@ -4,8 +4,12 @@ import com.bancocloud.usuarios_service.dto.*;
 import com.bancocloud.usuarios_service.model.*;
 import com.bancocloud.usuarios_service.repository.UsuarioRepository;
 import com.bancocloud.usuarios_service.exception.*;
+import com.bancocloud.usuarios_service.messaging.event.CambioEstadoUsuario;
+import com.bancocloud.usuarios_service.messaging.event.UsuarioEstadoCambiadoEvent;
+import com.bancocloud.usuarios_service.messaging.event.UsuarioRegistradoEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +21,7 @@ import java.util.List;
 public class UsuarioService {
 
     private final UsuarioRepository usuarioRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Crear un nuevo usuario BancoCloud asociado a Cognito.
@@ -57,6 +62,8 @@ public class UsuarioService {
                 usuarioGuardado.getId(),
                 usuarioGuardado.getCognitoSub()
         );
+
+        eventPublisher.publishEvent(UsuarioRegistradoEvent.from(usuarioGuardado));
 
         return mapToDTO(usuarioGuardado);
     }
@@ -211,6 +218,13 @@ public class UsuarioService {
                 autorizado
         );
 
+        eventPublisher.publishEvent(UsuarioEstadoCambiadoEvent.from(
+                usuarioActualizado,
+                Boolean.TRUE.equals(autorizado)
+                        ? CambioEstadoUsuario.AUTORIZADO
+                        : CambioEstadoUsuario.DESAUTORIZADO
+        ));
+
         return mapToDTO(usuarioActualizado);
     }
 
@@ -248,6 +262,11 @@ public class UsuarioService {
                 estadoAnterior
         );
 
+        eventPublisher.publishEvent(UsuarioEstadoCambiadoEvent.from(
+                usuarioActualizado,
+                CambioEstadoUsuario.BLOQUEADO
+        ));
+
         return mapToDTO(usuarioActualizado);
     }
 
@@ -284,6 +303,11 @@ public class UsuarioService {
                 "Usuario desbloqueado. Estado anterior: {}, Nuevo estado: ACTIVO",
                 estadoAnterior
         );
+
+        eventPublisher.publishEvent(UsuarioEstadoCambiadoEvent.from(
+                usuarioActualizado,
+                CambioEstadoUsuario.DESBLOQUEADO
+        ));
 
         return mapToDTO(usuarioActualizado);
     }

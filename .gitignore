@@ -33,6 +33,13 @@ dependency-reduced-pom.xml
 .gradle/
 build/
 
+# Node / frontend builds
+node_modules/
+dist/
+
+# Generated receipts (notificaciones-service local runs)
+data/
+
 # Logs
 logs/
 *.log

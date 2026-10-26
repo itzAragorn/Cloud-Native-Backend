@@ -5,8 +5,10 @@ import com.bancocloud.inversiones_service.dto.*;
 import com.bancocloud.inversiones_service.model.*;
 import com.bancocloud.inversiones_service.repository.InversionRepository;
 import com.bancocloud.inversiones_service.exception.*;
+import com.bancocloud.inversiones_service.messaging.event.InversionCreadaEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
@@ -20,6 +22,7 @@ public class InversionService {
     
     private final InversionRepository inversionRepository;
     private final FondoServiceClient fondoServiceClient;
+    private final ApplicationEventPublisher eventPublisher;
     
     /**
      * Crear una nueva inversión
@@ -52,6 +55,7 @@ public class InversionService {
         
         Inversion inversionGuardada = inversionRepository.save(inversion);
         log.info("Inversión creada exitosamente con id: {}, cuotas: {}", inversionGuardada.getId(), cuotas);
+        eventPublisher.publishEvent(InversionCreadaEvent.from(inversionGuardada));
         
         return mapToDTO(inversionGuardada);
     }

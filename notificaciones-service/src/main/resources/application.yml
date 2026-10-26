@@ -1,0 +1,55 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: notificaciones-service
+
+  # RabbitMQ connection - all values come from environment variables
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    connection-timeout: 5s
+    listener:
+      simple:
+        # Every listener acknowledges explicitly through MensajeAckHandler
+        acknowledge-mode: manual
+        prefetch: 10
+        # Safety net: anything rejected by the container goes to the DLQ, never back to the queue
+        default-requeue-rejected: false
+
+# Messaging names (read through RabbitMQProperties). DLQ names are derived as <queue>.dlq.
+app:
+  rabbitmq:
+    dlx: bancocloud.dlx
+    max-reintentos: 3
+    exchanges:
+      inversiones: bancocloud.inversiones
+      usuarios: bancocloud.usuarios
+      fondos: bancocloud.fondos
+    queues:
+      comprobante: inversiones.comprobante.q
+      registro: usuarios.registro.q
+      estado: usuarios.estado.q
+      valorcuota: fondos.valorcuota.q
+    routing-keys:
+      inversion-creada: inversion.creada
+      usuario-registrado: usuario.registrado
+      usuario-estado-pattern: usuario.estado.*
+      valorcuota-actualizado: fondo.valorcuota.actualizado
+  comprobantes:
+    directorio: ${COMPROBANTES_DIR:./data/comprobantes}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    root: INFO
+    com.bancocloud.notificaciones_service: DEBUG

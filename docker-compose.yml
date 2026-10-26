@@ -1,6 +1,37 @@
-version: '3.8'
+# Banco Cloud - full stack: RabbitMQ, 5 backend services, BFF and frontend.
+# All configuration comes from .env (see .env.example). Internal service URLs
+# use Docker service names and are fixed here.
+
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+  RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+  RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?define RABBITMQ_USERNAME in .env}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?define RABBITMQ_PASSWORD in .env}
+  RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
 
 services:
+  # ============ RabbitMQ ============
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: bancocloud-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?define RABBITMQ_USERNAME in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?define RABBITMQ_PASSWORD in .env}
+    ports:
+      # Management UI, only reachable from this machine
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - bancocloud-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 20s
+    restart: unless-stopped
+
   # ============ Usuarios Service ============
   usuarios-service:
     build:
@@ -8,14 +39,18 @@ services:
       dockerfile: Dockerfile
     container_name: bancocloud-usuarios-service
     environment:
+      <<: *rabbitmq-env
       # AWS RDS Configuration - Separate URL for usuarios_db
-      DB_URL: ${USUARIOS_DB_URL}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
+      USUARIOS_DB_URL: ${USUARIOS_DB_URL:?define USUARIOS_DB_URL in .env}
+      DB_USERNAME: ${DB_USERNAME:?define DB_USERNAME in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD in .env}
       # Logging
       LOGGING_LEVEL_COM_BANCOCLOUD_USUARIOS_SERVICE: DEBUG
     expose:
       - "8083"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - bancocloud-network
     healthcheck:
@@ -33,14 +68,18 @@ services:
       dockerfile: Dockerfile
     container_name: bancocloud-fondos-service
     environment:
+      <<: *rabbitmq-env
       # AWS RDS Configuration - Separate URL for fondos_db
-      DB_URL: ${FONDOS_DB_URL}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
+      FONDOS_DB_URL: ${FONDOS_DB_URL:?define FONDOS_DB_URL in .env}
+      DB_USERNAME: ${DB_USERNAME:?define DB_USERNAME in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD in .env}
       # Logging
       LOGGING_LEVEL_COM_BANCOCLOUD_FONDOS_SERVICE: DEBUG
     expose:
       - "8081"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - bancocloud-network
     healthcheck:
@@ -58,20 +97,76 @@ services:
       dockerfile: Dockerfile
     container_name: bancocloud-inversiones-service
     environment:
+      <<: *rabbitmq-env
       # AWS RDS Configuration - Separate URL for inversiones_db
-      DB_URL: ${INVERSIONES_DB_URL}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      # Fondos Service URL (use Docker service name in Docker, localhost for local dev)
-      FONDOS_SERVICE_URL: ${FONDOS_SERVICE_URL}
+      INVERSIONES_DB_URL: ${INVERSIONES_DB_URL:?define INVERSIONES_DB_URL in .env}
+      DB_USERNAME: ${DB_USERNAME:?define DB_USERNAME in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD in .env}
+      FONDOS_SERVICE_URL: http://fondos-service:8081
       # Logging
       LOGGING_LEVEL_COM_BANCOCLOUD_INVERSIONES_SERVICE: DEBUG
     expose:
       - "8082"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      fondos-service:
+        condition: service_healthy
     networks:
       - bancocloud-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============ Notificaciones Service (RabbitMQ consumers) ============
+  notificaciones-service:
+    build:
+      context: ./notificaciones-service
+      dockerfile: Dockerfile
+    container_name: bancocloud-notificaciones-service
+    environment:
+      <<: *rabbitmq-env
+      COMPROBANTES_DIR: /app/data/comprobantes
+      LOGGING_LEVEL_COM_BANCOCLOUD_NOTIFICACIONES_SERVICE: DEBUG
+    expose:
+      - "8084"
+    volumes:
+      - comprobantes-data:/app/data/comprobantes
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - bancocloud-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/actuator/health"]
+      timeout: 10s
+      retries: 5
+      interval: 15s
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============ RabbitMQ Admin Service ============
+  rabbit-admin-service:
+    build:
+      context: ./rabbit-admin-service
+      dockerfile: Dockerfile
+    container_name: bancocloud-rabbit-admin-service
+    environment:
+      <<: *rabbitmq-env
+      LOGGING_LEVEL_COM_BANCOCLOUD_RABBIT_ADMIN_SERVICE: DEBUG
+    expose:
+      - "8085"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - bancocloud-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/actuator/health"]
       timeout: 10s
       retries: 5
       interval: 15s
@@ -86,11 +181,13 @@ services:
     container_name: bancocloud-bff-service
     environment:
       # AWS Cognito Configuration
-      COGNITO_ISSUER: ${COGNITO_ISSUER}
-      # Microservices URLs (use Docker service names)
-      FONDOS_SERVICE_URL: ${FONDOS_SERVICE_URL}
-      INVERSIONES_SERVICE_URL: ${INVERSIONES_SERVICE_URL}
-      USUARIOS_SERVICE_URL: ${USUARIOS_SERVICE_URL}
+      COGNITO_ISSUER: ${COGNITO_ISSUER:?define COGNITO_ISSUER in .env}
+      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:?define COGNITO_CLIENT_ID in .env}
+      # Microservices URLs (Docker service names)
+      FONDOS_SERVICE_URL: http://fondos-service:8081
+      INVERSIONES_SERVICE_URL: http://inversiones-service:8082
+      USUARIOS_SERVICE_URL: http://usuarios-service:8083
+      RABBIT_ADMIN_SERVICE_URL: http://rabbit-admin-service:8085
       # CORS Configuration
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS}
       # Logging
@@ -104,6 +201,8 @@ services:
       inversiones-service:
         condition: service_healthy
       usuarios-service:
+        condition: service_healthy
+      rabbit-admin-service:
         condition: service_healthy
     networks:
       - bancocloud-network
@@ -145,3 +244,8 @@ services:
 networks:
   bancocloud-network:
     driver: bridge
+
+# ============ Volumes ============
+volumes:
+  rabbitmq-data:
+  comprobantes-data:

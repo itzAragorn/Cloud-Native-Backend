@@ -1,0 +1,79 @@
+server:
+  port: 8081
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: fondos-service
+
+  # Database Configuration - AWS RDS (required environment variables, no defaults)
+  datasource:
+    url: ${FONDOS_DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-timeout: 20000
+      maximum-pool-size: 5
+
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+
+  jackson:
+    serialization:
+      indent-output: true
+
+  web:
+    error:
+      include-message: always
+      include-binding-errors: always
+
+  # RabbitMQ connection - all values come from environment variables
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    # Fail fast if the broker is unreachable so HTTP requests are not held up
+    connection-timeout: 5s
+    # Publisher confirms/returns: RabbitMQConfig logs unconfirmed or unroutable messages
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+
+# Messaging names for the fondos domain (read through RabbitMQProperties).
+# DLQ names are derived as <queue>.dlq.
+app:
+  rabbitmq:
+    dlx: bancocloud.dlx
+    exchanges:
+      fondos: bancocloud.fondos
+    queues:
+      valorcuota: fondos.valorcuota.q
+    routing-keys:
+      valorcuota-actualizado: fondo.valorcuota.actualizado
+
+management:
+  health:
+    # RabbitMQ is optional for this service: business operations keep working without it
+    rabbit:
+      enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.bancocloud.fondos_service: DEBUG
+    org.springframework.web: INFO
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE

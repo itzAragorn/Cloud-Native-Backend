@@ -4,8 +4,10 @@ import com.bancocloud.fondos_service.dto.*;
 import com.bancocloud.fondos_service.model.*;
 import com.bancocloud.fondos_service.repository.FondoRepository;
 import com.bancocloud.fondos_service.exception.*;
+import com.bancocloud.fondos_service.messaging.event.ValorCuotaActualizadoEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
@@ -17,6 +19,7 @@ import java.util.List;
 public class FondoService {
     
     private final FondoRepository fondoRepository;
+    private final ApplicationEventPublisher eventPublisher;
     
     /**
      * Crear un nuevo fondo
@@ -94,6 +97,7 @@ public class FondoService {
         Fondo fondoActualizado = fondoRepository.save(fondo);
         log.info("Valor de cuota actualizado para fondo id: {}. Valor anterior: {}, Nuevo valor: {}", 
                 id, valorAnterior, request.getNuevoValor());
+        eventPublisher.publishEvent(ValorCuotaActualizadoEvent.from(fondoActualizado, valorAnterior));
         
         return mapToDTO(fondoActualizado);
     }

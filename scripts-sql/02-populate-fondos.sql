@@ -1,7 +1,10 @@
 -- ==========================================
 -- Script de Población: FONDOS-SERVICE
 -- ==========================================
--- Ejecutar este script en la base de datos de fondos-service
+-- Fondos de ejemplo. Ejecutar después de que fondos-service haya
+-- arrancado una vez (Hibernate crea la tabla fondos).
+--
+--   mysql -h <rds-endpoint> -u <usuario> -p < 02-populate-fondos.sql
 
 USE fondos_db;
 

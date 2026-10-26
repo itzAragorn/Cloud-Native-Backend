@@ -1,460 +1,109 @@
-# � Banco Cloud - Backend Microservicios
+# Banco Cloud — Backend
 
-**Estado:** ✅ **100% COMPLETADO - 4 MICROSERVICIOS FUNCIONALES**  
-**Última actualización:** 2026-09-14  
-**Stack:** Java 17, Spring Boot 3.x, MySQL, Docker, JWT  
-**Total Endpoints:** 36+ | **Clases Java:** 50+ | **LOC:** ~3500
+Backend de Banco Cloud, una aplicación de fondos mutuos. Son seis aplicaciones Java 17 + Spring Boot 4.1: un BFF, tres microservicios de dominio con MySQL en AWS RDS y dos servicios de mensajería sobre RabbitMQ. La autenticación usa AWS Cognito.
 
----
+Frontend: [Cloud-Native-Front-end](https://github.com/Nathaaam/Cloud-Native-Front-end)
 
-## 🎯 Inicio Rápido
+## Arquitectura
 
-👉 **¿Primera vez?** Comienza aquí:
-1. Lee [QUICKSTART.md](QUICKSTART.md) (5 minutos)
-2. Lee [INDEX.md](INDEX.md) para elegir tu rol
-3. Consulta [DOCUMENTACION_API.md](DOCUMENTACION_API.md) mientras trabajas
+```text
+Frontend (React) ──JWT Cognito──▶ bff-service :8090  /api/v1
+                                   ├─▶ usuarios-service    :8083 ── usuarios_db
+                                   ├─▶ fondos-service      :8081 ── fondos_db
+                                   ├─▶ inversiones-service :8082 ── inversiones_db
+                                   │       └─▶ fondos-service (valor cuota)
+                                   └─▶ rabbit-admin-service :8085 ──▶ RabbitMQ
 
----
-
-## 📦 Lo Que Se Implementó
-
-### 1. **FONDOS-SERVICE** (8081) ✅
-Gestión completa de fondos mutuos
-
-**Entidad Fondo:**
-- id, nombre, descripción, valorCuota
-- fechaCreacion, fechaActualizacion
-- estado (ACTIVO, INACTIVO, SUSPENDIDO)
-
-**Endpoints (6):**
-- `POST /api/v1/fondos` - Crear fondo
-- `GET /api/v1/fondos` - Listar todos
-- `GET /api/v1/fondos/activos` - Listar activos
-- `GET /api/v1/fondos/{id}` - Obtener por ID
-- `GET /api/v1/fondos/{id}/valor-cuota` - Obtener cuota actual
-- `PUT /api/v1/fondos/{id}/valor-cuota` - Actualizar cuota
-
-**Características:**
-- Validaciones con @Valid (nombres únicos, montos positivos)
-- Manejo de excepciones centralizado
-- Timestamps automáticos (@PrePersist/@PreUpdate)
-- Logging en todos los métodos
-
----
-
-### 2. **INVERSIONES-SERVICE** (8082) ✅
-Gestión de inversiones, portafolio y rendimiento
-
-**Entidad Inversion:**
-- id, usuarioId, fondoId
-- montoInvertido, cuotas, valorCuotaCompra
-- fechaInversion, fechaActualizacion
-- estado (ACTIVA, RETIRADA, CANCELADA)
-
-**Endpoints (6):**
-- `POST /api/v1/inversiones` - Crear inversión
-- `GET /api/v1/inversiones/mis-inversiones?usuarioId=X` - Mis inversiones
-- `GET /api/v1/inversiones/mi-portafolio?usuarioId=X` - Portafolio completo
-- `GET /api/v1/inversiones/{id}` - Obtener inversión
-- `GET /api/v1/inversiones/{id}/rendimiento` - Rendimiento de inversión
-- `GET /api/v1/inversiones/rendimiento?usuarioId=X` - Rendimiento del usuario
-
-**Características IMPORTANTES:**
-- ✅ **Comunicación inter-servicio**: Consulta fondos-service para obtener valor de cuota actual
-- ✅ **Cálculos automáticos**: 
-  - cuotas = montoInvertido / valorCuota (4 decimales, redondeo HALF_UP)
-  - valorTotalActual = cuotas × valorActualCuota
-  - rendimiento = valorTotalActual - montoInvertido
-  - rendimientoPorcentaje (con protección contra división por cero)
-- ✅ **RestTemplate client** configurado con timeouts
-- ✅ **Manejo robusto** de errores de comunicación
-
----
-
-### 3. **USUARIOS-SERVICE** (8083) ✅
-Gestión de usuarios, autorización y control de acceso
-
-**Entidad Usuario:**
-- id, nombre, email (único)
-- rol (ADMIN, CLIENTE)
-- accesoAutorizado (true/false)
-- estado (ACTIVO, BLOQUEADO, INACTIVO)
-- fechaCreacion, fechaActualizacion
-
-**Endpoints (9):**
-- `POST /api/v1/usuarios` - Crear usuario
-- `GET /api/v1/usuarios` - Listar todos
-- `GET /api/v1/usuarios/por-rol?rol=CLIENTE` - Por rol
-- `GET /api/v1/usuarios/pendientes-autorizacion` - Pendientes de autorizar
-- `GET /api/v1/usuarios/{id}` - Por ID
-- `GET /api/v1/usuarios/por-email?email=X` - Por email
-- `PUT /api/v1/usuarios/{id}/autorizar` - Autorizar acceso
-- `PUT /api/v1/usuarios/{id}/bloquear` - Bloquear usuario
-- `PUT /api/v1/usuarios/{id}/desbloquear` - Desbloquear
-- `GET /api/v1/usuarios/{id}/verificar-acceso` - Verificar si puede acceder
-
-**Características:**
-- **ADMIN nace autorizado automáticamente**
-- **CLIENTE nace sin autorización** (requiere aprobación de ADMIN)
-- Validación de email único
-- Bloqueo/desbloqueo de usuarios con pérdida de acceso
-
----
-
-### 4. **BFF-SERVICE** (8080) ✅
-Backend for Frontend - API Gateway, Autenticación JWT y Routing
-
-**Funcionalidades:**
-- `POST /api/v1/auth/login` - Autenticación JWT (email/password)
-- `GET /api/v1/auth/verify` - Verificar token válido
-- `POST /api/v1/auth/logout` - Logout
-- Proxy a los 3 microservicios con validación de JWT
-- CORS configurado para React (puerto 3000)
-- Role-based authorization (@PreAuthorize)
-
-**Características IMPORTANTES:**
-- ✅ **JWT Token Generation**: Genera tokens con expiración de 24h
-- ✅ **JwtAuthenticationFilter**: Valida JWT en cada request
-- ✅ **JwtTokenProvider**: Manejo seguro de tokens
-- ✅ **Routing inteligente**: Proxy transparente a microservicios
-- ✅ **Manejo centralizado de excepciones**
-- ✅ **RestTemplate clients** con timeouts configurados
-
-**Controllers Implementados:**
-- AuthController - Login y autenticación
-- FondosProxyController - Proxy a fondos-service
-- InversionesProxyController - Proxy a inversiones-service  
-- UsuariosProxyController - Proxy a usuarios-service
-- HealthCheckController - Healthcheck de servicios
-
-**Configuración:**
-- application.properties con JWT (secret, expiration, issuer)
-- SecurityConfig con Spring Security 7.x
-- RestTemplateConfig con TimeoutClientHttpRequestFactory
-- GlobalExceptionHandler para manejo de errores
-
-
----
-
-## 📊 Estructura Técnica
-
-```
-Cada Microservicio Implementa:
-
-Model/               → Entidades JPA con validaciones
-Repository/         → Spring Data JPA con custom queries
-Service/            → Lógica de negocio (con @Transactional)
-Controller/         → REST API endpoints (@Valid)
-DTO/                → Objetos de transferencia validados
-Exception/          → Custom exceptions + GlobalExceptionHandler
-Config/             → Beans y configuraciones (ej: RestTemplate)
-Resources/          → application.properties (DB, port, logging)
+usuarios / fondos / inversiones ──eventos──▶ RabbitMQ ──▶ notificaciones-service :8084
 ```
 
-**Database per Service Pattern:**
-- fondos_db (8 tablas auto-creadas)
-- inversiones_db (8 tablas auto-creadas)
-- usuarios_db (8 tablas auto-creadas)
+| Servicio | Puerto | Responsabilidad |
+|---|---|---|
+| `bff-service` | 8090 | Única entrada del frontend. Valida el Access Token de Cognito (firma, `iss`, expiración, `token_use`, `client_id`), asigna el rol local y reenvía a los servicios. |
+| `usuarios-service` | 8083 | Perfiles asociados a Cognito (`cognito_sub`), rol `ADMIN`/`CLIENTE`, autorización y bloqueo. |
+| `fondos-service` | 8081 | Fondos mutuos y valor cuota. |
+| `inversiones-service` | 8082 | Inversiones, portafolio y rendimiento. Cuotas con 4 decimales `HALF_UP`. |
+| `notificaciones-service` | 8084 | Consume los eventos: comprobantes de inversión y notificaciones. |
+| `rabbit-admin-service` | 8085 | API REST para administrar colas, exchanges y bindings. |
 
----
+## Mensajería (RabbitMQ)
 
-## 🔌 Comunicación Inter-Servicios
+Los servicios de dominio publican un evento **después del commit** de cada operación. Si RabbitMQ no está disponible, la operación igual responde bien y el error queda en el log.
 
-**Arquitectura Completa:**
-```
-React Frontend (Puerto 3000)
-    ↓ (Login + JWT Token en Header)
-[BFF Service - Puerto 8080] ✅ IMPLEMENTADO
-    • POST /api/v1/auth/login → Autentica usuario
-    • JWT Token valida en cada request
-    • Spring Security + @PreAuthorize (ROLE-based)
-    • CORS configurado
-    ↓
-├── [Fondos-Service - Puerto 8081]
-│   ├── GET /api/v1/fondos
-│   ├── POST /api/v1/fondos (solo ADMIN)
-│   └── PUT /api/v1/fondos/{id}/valor-cuota (solo ADMIN)
-│
-├── [Inversiones-Service - Puerto 8082]
-│   ├── POST /api/v1/inversiones (CLIENTE)
-│   ├── GET /api/v1/inversiones/mi-portafolio (CLIENTE)
-│   └── Llama a fondos-service (inter-service call)
-│
-└── [Usuarios-Service - Puerto 8083]
-    ├── GET /api/v1/usuarios
-    ├── PUT /api/v1/usuarios/{id}/autorizar (ADMIN)
-    └── POST /api/v1/usuarios (público - registro)
-```
+| Caso de uso | Exchange (topic) · routing key | Cola | Acción del consumidor |
+|---|---|---|---|
+| Inversión creada | `bancocloud.inversiones` · `inversion.creada` | `inversiones.comprobante.q` | Genera el comprobante `BC-<año>-<correlativo>` en JSON |
+| Usuario registrado | `bancocloud.usuarios` · `usuario.registrado` | `usuarios.registro.q` | Aviso al administrador |
+| Cambio de estado | `bancocloud.usuarios` · `usuario.estado.*` | `usuarios.estado.q` | Notificación al cliente (autorizado, desautorizado, bloqueado, desbloqueado) |
+| Valor cuota actualizado | `bancocloud.fondos` · `fondo.valorcuota.actualizado` | `fondos.valorcuota.q` | Registro del cambio y aviso a inversionistas |
 
-**Flujo de Autenticación:**
-1. Frontend envía `POST /api/v1/auth/login {email, password}`
-2. BFF valida credenciales contra usuarios-service
-3. Si es válido: **genera JWT token** (válido 24h)
-4. Frontend almacena JWT en localStorage
-5. Frontend envía JWT en header `Authorization: Bearer <token>`
-6. BFF valida JWT en cada request via `JwtAuthenticationFilter`
-7. Si es válido: procesa la petición y llama al microservicio correspondiente
-8. Si es inválido: retorna 401 Unauthorized
+Cada cola declara `x-dead-letter-exchange = bancocloud.dlx` y tiene su DLQ `<cola>.dlq`. Los nombres están centralizados en `application.yml` (`app.rabbitmq`) y la topología se declara en `messaging/config/RabbitMQConfig` de cada servicio.
 
-**JWT Token Incluye:**
-- `usuarioId` - ID del usuario
-- `email` - Email del usuario
-- `rol` - ADMIN o CLIENTE
-- `exp` - Timestamp de expiración
-- `iat` - Timestamp de emisión
-- Firma HMAC-SHA512 con clave secreta
+**Confirmación de mensajes en notificaciones-service** (`acknowledge-mode: manual`, política en `MensajeAckHandler`):
 
-**Comunicación Fondos ↔ Inversiones:**
-- inversiones-service llama a fondos-service via RestTemplate
-- Obtiene valor actual de cuota para recalcular portafolio
-- Timeout configurado: 5s connect, 10s read
-- Manejo de errores con FondoServiceException
+- Éxito → `basicAck`.
+- Error no recuperable (JSON inválido, datos faltantes) → `basicNack(requeue=false)` → DLQ.
+- Error recuperable → se republica con `x-retry-count` hasta 3 veces; agotados los intentos → DLQ.
+- `DlqListener` registra cada mensaje muerto con su header `x-death` (cola de origen, motivo, cantidad).
 
----
+## API de administración de RabbitMQ
 
-## 📚 Documentación Creada
+Expuesta por el BFF en `/api/v1/admin/rabbit` (solo rol `ADMIN`). Dentro de la red Docker, rabbit-admin-service atiende las mismas rutas sin el prefijo.
 
-### 1. **DOCUMENTACION_API.md** (Completa)
-- Requisitos previos (Java 17, Maven, MySQL)
-- Setup paso a paso
-- Estructura de proyectos
-- Todos los endpoints documentados con ejemplos JSON
-- Flujos de negocio
-- Códigos de error HTTP
-- 2000+ líneas de documentación técnica
+| Método | Ruta | Cuerpo | Respuestas |
+|---|---|---|---|
+| POST | `/queues` | `name`, `durable`, `deadLetterExchange`, `deadLetterRoutingKey`, `ttlMs` | 201 · 400 · 409 |
+| GET | `/queues/{name}` | — | 200 (mensajes y consumidores) · 404 |
+| DELETE | `/queues/{name}` | — | 204 · 404 |
+| POST | `/exchanges` | `name`, `type` (`DIRECT`, `TOPIC`, `FANOUT`, `HEADERS`), `durable` | 201 · 400 · 409 |
+| DELETE | `/exchanges/{name}` | — | 204 · 404 |
+| POST | `/bindings` | `queue`, `exchange`, `routingKey` | 201 · 400 · 404 |
+| DELETE | `/bindings` | `queue`, `exchange`, `routingKey` | 204 · 404 |
 
-### 2. **QUICKSTART.md** (Guía de 5 minutos)
-- Setup rápido
-- Comandos copy-paste
-- Troubleshooting común
-- Comandos útiles
+Los nombres admiten letras, números, `.`, `_` y `-` (máximo 100) y no pueden empezar con `amq.`. Un error de validación devuelve 400 con `errores: [{campo, error}]`.
 
-### 3. **CHECKLIST_DESARROLLO.md**
-- Todas las tareas completadas ✅
-- Tareas pendientes ⏳
-- Métricas de implementación (39 clases, ~2700 LOC)
-- Próximos pasos recomendados
+## Configuración
 
-### 4. **BancoCloud-Postman-Collection.json**
-- 17 requests preconfigurados
-- Flujo completo de tutorial
-- Importable directamente en Postman
+Copia `.env.example` a `.env` y completa los valores. `.env` está en `.gitignore` y nunca se sube al repositorio.
 
----
+| Variables | Uso |
+|---|---|
+| `USUARIOS_DB_URL`, `FONDOS_DB_URL`, `INVERSIONES_DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Conexión a RDS |
+| `COGNITO_ISSUER`, `COGNITO_CLIENT_ID` | User Pool y App Client que valida el BFF |
+| `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD`, `RABBITMQ_VHOST` | Broker RabbitMQ |
+| `APP_CORS_ALLOWED_ORIGINS` | Orígenes permitidos por el BFF |
+| `VITE_*` | Build del frontend en Docker Compose |
 
-## 🧪 Validación & Manejo de Errores
+## Ejecución
 
-### Validaciones Implementadas ✅
-- `@NotNull`, `@NotBlank` - Campos requeridos
-- `@Size(min=3, max=100)` - Longitud de strings
-- `@Email` - Formato de email
-- `@DecimalMin("0.01")` - Montos positivos
-- Validaciones de negocio (emails únicos, fondos únicos)
-- Cálculos con protección contra división por cero
+**Docker Compose** (todo el stack, incluido RabbitMQ y el frontend):
 
-### Códigos HTTP Correctos ✅
-- **201 Created** - Recursos creados
-- **200 OK** - Operaciones exitosas
-- **400 Bad Request** - Validación fallida (con detalles de campos)
-- **404 Not Found** - Recurso no existe
-- **409 Conflict** - Duplicados
-- **500 Internal Server Error** - Errores internos
-
-### Respuestas de Error Consistentes ✅
-```json
-{
-  "timestamp": "2024-01-15T10:30:00",
-  "status": 404,
-  "error": "NOT_FOUND",
-  "message": "Fondo no encontrado con id: 999",
-  "path": "/api/v1/fondos/999"
-}
+```bash
+cp .env.example .env    # completar valores
+docker compose up -d --build
 ```
 
----
+La consola de RabbitMQ queda en http://localhost:15672 (solo desde la misma máquina). El script `docker-compose.sh` ofrece atajos: `up`, `down`, `logs`, `ps`, `build`, `rebuild`, `shell` y `health`.
 
-## 🚀 Cómo Usar
+**Un servicio fuera de Docker** (con las variables de `.env` exportadas y `RABBITMQ_HOST=localhost`):
 
-### Setup Inicial (5 minutos)
-1. **Crear BDs MySQL**
-   ```sql
-   CREATE DATABASE fondos_db;
-   CREATE DATABASE inversiones_db;
-   CREATE DATABASE usuarios_db;
-   ```
-
-2. **Compilar** (en el directorio workspace)
-   ```bash
-   cd fondos-service && mvn clean install && cd ..
-   cd inversiones-service && mvn clean install && cd ..
-   cd usuarios-service && mvn clean install && cd ..
-   ```
-
-3. **Ejecutar** (3 terminales, una por servicio)
-   ```bash
-   mvn spring-boot:run  # En cada directorio
-   ```
-
-4. **Probar** (Terminal 4)
-   ```bash
-   curl http://localhost:8081/api/v1/fondos
-   curl http://localhost:8083/api/v1/usuarios
-   curl http://localhost:8082/api/v1/inversiones/mi-portafolio?usuarioId=1
-   ```
-
-### Importar en Postman
-1. Open Postman → Import
-2. Upload `BancoCloud-Postman-Collection.json`
-3. Ejecutar requests desde la interfaz
-
----
-
-## 📋 Flujos de Negocio Implementados
-
-### Flujo 1: Autorización de Cliente
-```
-1. Cliente se registra (rol=CLIENTE, accesoAutorizado=false)
-2. ADMIN ve cliente pendiente en /pendientes-autorizacion
-3. ADMIN autoriza: PUT /usuarios/{id}/autorizar {autorizado: true}
-4. Cliente ahora puede acceder
+```bash
+docker run -d --name rabbit -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+cd fondos-service && ./mvnw spring-boot:run
 ```
 
-### Flujo 2: Invertir en Fondo
-```
-1. ADMIN crea fondo: POST /fondos {nombre, descripción, valorCuota: 50}
-2. Cliente autorizado crea inversión: POST /inversiones 
-   {usuarioId: 1, fondoId: 1, montoInvertido: 1000}
-3. Sistema calcula: cuotas = 1000 / 50 = 20 cuotas
-4. Cliente puede ver portafolio con valor actual y rendimiento
-```
+## Base de datos
 
-### Flujo 3: Monitorear Cambios de Mercado
-```
-1. ADMIN actualiza valor de cuota: PUT /fondos/{id}/valor-cuota {nuevoValor: 55}
-2. Cliente consulta portafolio: GET /inversiones/mi-portafolio?usuarioId=1
-3. Sistema recalcula automáticamente:
-   - Valor actual: 20 cuotas × 55 = 1100
-   - Rendimiento: 1100 - 1000 = 100 (10%)
+Scripts en `scripts-sql/`:
+
+1. `00-init-databases.sql`: crea `usuarios_db`, `fondos_db` e `inversiones_db`. Las tablas las crea Hibernate al arrancar cada servicio.
+2. `01-promover-admin.sql`: convierte en `ADMIN` a un usuario ya registrado desde el frontend.
+3. `02-populate-fondos.sql`: fondos de ejemplo.
+
+## Pruebas
+
+```bash
+cd <servicio> && ./mvnw clean package
 ```
 
----
-
-## 🔐 Roles y Permisos
-
-| Acción | ADMIN | CLIENTE | Sin Auth |
-|--------|-------|---------|----------|
-| Crear Fondo | ✅ | ❌ | ❌ |
-| Ver Fondos | ✅ | ✅ | ❌ |
-| Actualizar Cuota | ✅ | ❌ | ❌ |
-| Crear Inversión | ❌ | ✅ | ❌ |
-| Ver Portafolio | ❌ | ✅ | ❌ |
-| Autorizar Usuario | ✅ | ❌ | ❌ |
-| Bloquear Usuario | ✅ | ❌ | ❌ |
-
-*Nota: BFF service aplicará estos permisos a nivel de API Gateway en siguiente fase*
-
----
-
-## ⏳ Fases Pendientes
-
-### Fase 5: React Frontend - ~3-4 días
-- Autenticación simple (login con JWT)
-- Protected routes
-- Componentes: Login, Dashboard, Inversiones, Portafolio
-- API integration via BFF (puerto 8080)
-- TypeScript + React Hooks
-- Estado global (Redux o Context API)
-
-### Fase 6: Testing - ~2-3 días
-- Unit tests (Mockito para Java)
-- Integration tests (MockMvc, RestAssured)
-- End-to-end tests (Selenium/Cypress)
-- Coverage > 80%
-
-### Fase 7: AWS Deployment - ~2-3 días
-- Docker images optimizadas
-- AWS RDS para MySQL
-- ECS o EC2 para servicios
-- CI/CD pipeline (GitHub Actions)
-
----
-
-## 📈 Métricas
-
-| Métrica | Valor |
-|---------|-------|
-| Servicios Implementados | ✅ 4 / 4 COMPLETADOS |
-| Endpoints Totales | 36+ |
-| Controllers | 8 (3 proxy + auth + health) |
-| Clases Java | 50+ |
-| Líneas de Código | ~3500 |
-| Documentación | 8 archivos completos |
-| Bases de Datos | 3 (mysql) |
-| JWT Configurado | ✅ Sí |
-| Tiempo de Setup | 5-10 minutos |
-
----
-
-## 🎯 Próximos Pasos Inmediatos
-
-1. **Ejecutar setup local** siguiendo [QUICKSTART.md](QUICKSTART.md)
-2. **Probar endpoints** con [BancoCloud-Postman-Collection.json](BancoCloud-Postman-Collection.json)
-3. **Revisar logs** en consola para entender flujo
-4. **Leer [DOCUMENTACION_API.md](DOCUMENTACION_API.md)** para detalles completos
-5. **Implementar React Frontend** con autenticación JWT
-6. **Escribir tests unitarios** e integración
-
----
-
-## ✨ Características Destacadas
-
-✅ **Arquitectura limpia** - Separación clara de capas  
-✅ **Validación robusta** - Todas las entradas validadas  
-✅ **Manejo de errores** - GlobalExceptionHandler + custom exceptions  
-✅ **Logging completo** - Slf4j en todos los métodos importantes  
-✅ **Transacciones** - @Transactional con readOnly donde aplica  
-✅ **Escalabilidad** - Database per microservice pattern  
-✅ **JWT Token** - Autenticación stateless, válido 24 horas  
-✅ **Spring Security** - @PreAuthorize para control de roles  
-✅ **Inter-service communication** - RestTemplate con timeouts  
-✅ **CORS** - Configurado para React (localhost:3000)  
-✅ **Cálculos precisos** - BigDecimal con RoundingMode  
-✅ **Documentación** - API docs + setup guides + checklist  
-✅ **Testing ready** - Estructura lista para unit/integration tests  
-✅ **4 Microservicios** - Completamente independientes y escalables  
-
----
-
-## 📞 Soporte
-
-Si encuentras algún error:
-1. Revisar [QUICKSTART.md](QUICKSTART.md) - Troubleshooting section
-2. Revisar logs en consola (rojo = error)
-3. Verificar que las 3 bases de datos existen
-4. Verificar que los 4 servicios están corriendo en los puertos correctos:
-   - BFF: 8080, Fondos: 8081, Inversiones: 8082, Usuarios: 8083
-5. Verificar logs en `target/` de cada servicio
-
----
-
-## 🎓 Aprendizajes Implementados
-
-Este proyecto implementa muchas **best practices de Java/Spring**:
-- Clean Code (nombres significativos, métodos pequños)
-- SOLID principles (separation of concerns)
-- Design Patterns (DTO, Repository, Service, Factory)
-- REST conventions (status codes, resource paths)
-- Error handling (custom exceptions, global handler)
-- Logging strategies (structured, contextual)
-- Database design (proper indexes, constraints)
-- Configuration management (externalizable)
-- Microservices architecture (independent DBs, loose coupling)
-
----
-
-**Versión**: 1.1  
-**Última actualización**: 2026-09-14  
-**Estado**: ✅ 90% Completado (Fases 1-4 de 7 - Backend 100%, Frontend Pendiente)  
-**Tiempo estimado para 100%**: 1-2 semanas  
-
-**¡Backend Completamente Funcional! 🚀 Listo para React Frontend**
+Los tests no requieren AWS ni RabbitMQ: los de contexto usan H2 en memoria y los de mensajería usan `RabbitTemplate` y `Channel` simulados con Mockito.

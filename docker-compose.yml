@@ -188,6 +188,7 @@ services:
       INVERSIONES_SERVICE_URL: http://inversiones-service:8082
       USUARIOS_SERVICE_URL: http://usuarios-service:8083
       RABBIT_ADMIN_SERVICE_URL: http://rabbit-admin-service:8085
+      NOTIFICACIONES_SERVICE_URL: http://notificaciones-service:8084
       # CORS Configuration
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS}
       # Logging
@@ -203,6 +204,8 @@ services:
       usuarios-service:
         condition: service_healthy
       rabbit-admin-service:
+        condition: service_healthy
+      notificaciones-service:
         condition: service_healthy
     networks:
       - bancocloud-network

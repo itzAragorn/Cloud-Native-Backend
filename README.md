@@ -12,7 +12,8 @@ Frontend (React) ──JWT Cognito──▶ bff-service :8090  /api/v1
                                    ├─▶ fondos-service      :8081 ── fondos_db
                                    ├─▶ inversiones-service :8082 ── inversiones_db
                                    │       └─▶ fondos-service (valor cuota)
-                                   └─▶ rabbit-admin-service :8085 ──▶ RabbitMQ
+                                   ├─▶ rabbit-admin-service :8085 ──▶ RabbitMQ
+                                   └─▶ notificaciones-service :8084 (comprobantes)
 
 usuarios / fondos / inversiones ──eventos──▶ RabbitMQ ──▶ notificaciones-service :8084
 ```
@@ -23,7 +24,7 @@ usuarios / fondos / inversiones ──eventos──▶ RabbitMQ ──▶ notifi
 | `usuarios-service` | 8083 | Perfiles asociados a Cognito (`cognito_sub`), rol `ADMIN`/`CLIENTE`, autorización y bloqueo. |
 | `fondos-service` | 8081 | Fondos mutuos y valor cuota. |
 | `inversiones-service` | 8082 | Inversiones, portafolio y rendimiento. Cuotas con 4 decimales `HALF_UP`. |
-| `notificaciones-service` | 8084 | Consume los eventos: comprobantes de inversión y notificaciones. |
+| `notificaciones-service` | 8084 | Consume los eventos: comprobantes de inversión y notificaciones. Expone la consulta de comprobantes. |
 | `rabbit-admin-service` | 8085 | API REST para administrar colas, exchanges y bindings. |
 
 ## Mensajería (RabbitMQ)
@@ -45,6 +46,8 @@ Cada cola declara `x-dead-letter-exchange = bancocloud.dlx` y tiene su DLQ `<col
 - Error no recuperable (JSON inválido, datos faltantes) → `basicNack(requeue=false)` → DLQ.
 - Error recuperable → se republica con `x-retry-count` hasta 3 veces; agotados los intentos → DLQ.
 - `DlqListener` registra cada mensaje muerto con su header `x-death` (cola de origen, motivo, cantidad).
+
+La generación de comprobantes es idempotente: si un evento llega dos veces, se devuelve el comprobante ya emitido. Se consultan en `GET /api/v1/comprobantes?usuarioId=` (un CLIENTE solo ve los suyos).
 
 ## API de administración de RabbitMQ
 

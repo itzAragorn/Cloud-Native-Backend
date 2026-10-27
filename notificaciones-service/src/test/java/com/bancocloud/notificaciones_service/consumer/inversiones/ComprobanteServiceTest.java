@@ -55,6 +55,42 @@ class ComprobanteServiceTest {
     }
 
     @Test
+    void eventoDuplicadoDevuelveElMismoComprobante() throws Exception {
+        ComprobanteService service = servicio(dir);
+
+        Comprobante primero = service.generar(evento(10));
+        Comprobante repetido = service.generar(evento(10));
+
+        assertThat(repetido).isEqualTo(primero);
+        assertThat(Files.list(dir).filter(p -> p.getFileName().toString().endsWith(".json")).count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void elIndiceSeReconstruyeAlReiniciarYEvitaDuplicados() {
+        Comprobante original = servicio(dir).generar(evento(10));
+
+        ComprobanteService reiniciado = servicio(dir);
+
+        assertThat(reiniciado.buscarPorInversion(10L)).contains(original);
+        assertThat(reiniciado.generar(evento(10)).numero()).isEqualTo("BC-2026-000001");
+    }
+
+    @Test
+    void listaSoloLosComprobantesDelUsuario() {
+        ComprobanteService service = servicio(dir);
+        service.generar(evento(10));
+        service.generar(evento(11));
+        service.generar(new InversionCreadaEvent("evt-x", 12L, 99L, 2L, new BigDecimal("5.00"),
+                new BigDecimal("1.0000"), new BigDecimal("5.00"), LocalDateTime.of(2026, 10, 26, 15, 0)));
+
+        assertThat(service.listarPorUsuario(1L))
+                .extracting(Comprobante::numero)
+                .containsExactly("BC-2026-000002", "BC-2026-000001");
+        assertThat(service.buscarPorInversion(404L)).isEmpty();
+    }
+
+    @Test
     void errorDeDiscoEsRecuperable() throws Exception {
         Path archivo = Files.writeString(dir.resolve("no-es-directorio"), "x");
 

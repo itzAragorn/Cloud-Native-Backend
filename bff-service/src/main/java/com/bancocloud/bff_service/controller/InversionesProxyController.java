@@ -2,6 +2,7 @@ package com.bancocloud.bff_service.controller;
 
 import com.bancocloud.bff_service.client.InversionesServiceClient;
 import com.bancocloud.bff_service.client.UsuariosServiceClient;
+import com.bancocloud.bff_service.security.UsuarioPropietarioResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,16 +25,21 @@ public class InversionesProxyController {
 
     private final InversionesServiceClient inversionesServiceClient;
     private final UsuariosServiceClient usuariosServiceClient;
+    private final UsuarioPropietarioResolver usuarioPropietarioResolver;
 
     public InversionesProxyController(
             InversionesServiceClient inversionesServiceClient,
-            UsuariosServiceClient usuariosServiceClient) {
+            UsuariosServiceClient usuariosServiceClient,
+            UsuarioPropietarioResolver usuarioPropietarioResolver) {
 
         this.inversionesServiceClient =
                 inversionesServiceClient;
 
         this.usuariosServiceClient =
                 usuariosServiceClient;
+
+        this.usuarioPropietarioResolver =
+                usuarioPropietarioResolver;
     }
 
     /**
@@ -125,7 +131,7 @@ public class InversionesProxyController {
             JwtAuthenticationToken authentication) {
 
         Long usuarioIdFinal =
-                obtenerUsuarioIdPermitido(
+                usuarioPropietarioResolver.obtenerUsuarioIdPermitido(
                         usuarioId,
                         authentication
                 );
@@ -170,7 +176,7 @@ public class InversionesProxyController {
             JwtAuthenticationToken authentication) {
 
         Long usuarioIdFinal =
-                obtenerUsuarioIdPermitido(
+                usuarioPropietarioResolver.obtenerUsuarioIdPermitido(
                         usuarioId,
                         authentication
                 );
@@ -269,7 +275,7 @@ public class InversionesProxyController {
             JwtAuthenticationToken authentication) {
 
         Long usuarioIdFinal =
-                obtenerUsuarioIdPermitido(
+                usuarioPropietarioResolver.obtenerUsuarioIdPermitido(
                         usuarioId,
                         authentication
                 );
@@ -292,59 +298,5 @@ public class InversionesProxyController {
                         );
 
         return ResponseEntity.ok(response);
-    }
-
-    /**
-     * Determina qué usuario puede consultar el CLIENTE.
-     *
-     * ADMIN puede consultar cualquier usuario.
-     * CLIENTE solamente puede consultar su propio ID.
-     */
-    private Long obtenerUsuarioIdPermitido(
-            Long usuarioIdSolicitado,
-            JwtAuthenticationToken authentication) {
-
-        boolean esAdmin =
-                authentication.getAuthorities()
-                        .stream()
-                        .anyMatch(a ->
-                                a.getAuthority()
-                                        .equals("ROLE_ADMIN"));
-
-        if (esAdmin) {
-            return usuarioIdSolicitado;
-        }
-
-        String cognitoSub =
-                authentication.getToken().getSubject();
-
-        Map<String, Object> usuario =
-                usuariosServiceClient
-                        .obtenerUsuarioPorCognitoSub(
-                                cognitoSub
-                        );
-
-        if (usuario == null ||
-                usuario.get("id") == null) {
-            return null;
-        }
-
-        Long usuarioIdAutenticado =
-                ((Number) usuario.get("id")).longValue();
-
-        if (!usuarioIdAutenticado.equals(
-                usuarioIdSolicitado)) {
-
-            log.warn(
-                    "Intento de acceso a inversiones de otro usuario. " +
-                    "Usuario autenticado={}, usuario solicitado={}",
-                    usuarioIdAutenticado,
-                    usuarioIdSolicitado
-            );
-
-            return null;
-        }
-
-        return usuarioIdAutenticado;
     }
 }

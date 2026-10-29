@@ -95,11 +95,53 @@ docker run -d --name rabbit -p 5672:5672 -p 15672:15672 rabbitmq:3-management
 cd fondos-service && ./mvnw spring-boot:run
 ```
 
+## Despliegue en AWS
+
+```text
+Navegador ─ CloudFront ─ S3 (frontend)
+    │
+    └─ API Gateway (HTTP API) ─ VPC Link ─ ALB interno :80 ─ EC2 :8090 (BFF)
+                                                             ├─ RabbitMQ y 5 servicios (Docker Compose)
+                                                             └─ RDS MySQL (privado)
+```
+
+En la EC2 corre solo el backend. El frontend se publica en S3 con `scripts/deploy-s3.sh` del repositorio del frontend.
+
+Requisitos de la infraestructura:
+
+- **EC2:** salida a internet (NAT) para descargar el código, las imágenes y las dependencias de Maven. Se recomienda una `t3.medium` o mayor. El script agrega 2 GB de swap si hay menos de 6 GB de RAM.
+- **Security groups:** el de la EC2 abre el 8090 solo al security group del ALB. El de RDS abre el 3306 solo al de la EC2.
+- **ALB:** el target group apunta a la EC2 en el puerto 8090, con health check en `/api/v1/health`.
+- **API Gateway:** ruta `ANY /{proxy+}` hacia el ALB y stage `$default`. No debe tener CORS configurado, porque lo maneja el BFF.
+
+Pasos en la EC2, por ejemplo desde Session Manager:
+
+```bash
+sudo dnf install -y git                  # Ubuntu: sudo apt-get install -y git
+sudo mkdir -p /opt/bancocloud && sudo chown "$USER" /opt/bancocloud
+git clone https://github.com/itzAragorn/Cloud-Native-Backend.git /opt/bancocloud/backend
+cd /opt/bancocloud/backend
+
+./deploy/ec2-deploy.sh preparar          # Docker, Compose, Buildx y swap; luego cerrar sesión y volver a entrar
+cp .env.example .env && nano .env        # valores reales; RABBITMQ_HOST=rabbitmq
+./deploy/ec2-deploy.sh rds-init          # una vez: bases y usuario de la app (pide el usuario maestro de RDS)
+./deploy/ec2-deploy.sh desplegar         # git pull + build + espera a que todo esté healthy
+```
+
+Para ver el estado usa `./deploy/ec2-deploy.sh estado` y, para revisar un servicio, `./deploy/ec2-deploy.sh logs <servicio>`. Antes de levantar nada, `desplegar` valida el `.env`: rechaza valores de ejemplo, la base en `localhost`, el usuario `guest` de RabbitMQ y la falta de una URL `https` en CORS.
+
+Para ver la consola de RabbitMQ sin abrir puertos, haz port forwarding de Session Manager al 15672 de la EC2:
+
+```bash
+aws ssm start-session --target <instance-id> --document-name AWS-StartPortForwardingSession \
+  --parameters portNumber=15672,localPortNumber=15672
+```
+
 ## Base de datos
 
 Scripts en `scripts-sql/`:
 
-1. `00-init-databases.sql`: crea `usuarios_db`, `fondos_db` e `inversiones_db`. Las tablas las crea Hibernate al arrancar cada servicio.
+1. `00-init-databases.sql`: crea `usuarios_db`, `fondos_db` e `inversiones_db`. Las tablas las crea Hibernate al arrancar cada servicio. En RDS conviene usar `./deploy/ec2-deploy.sh rds-init`, que además crea el usuario de la app con permisos solo sobre esas bases.
 2. `01-promover-admin.sql`: convierte en `ADMIN` a un usuario ya registrado desde el frontend.
 3. `02-populate-fondos.sql`: fondos de ejemplo.
 

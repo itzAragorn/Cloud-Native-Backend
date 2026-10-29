@@ -185,6 +185,8 @@ services:
       # AWS Cognito Configuration
       COGNITO_ISSUER: ${COGNITO_ISSUER:?define COGNITO_ISSUER in .env}
       COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:?define COGNITO_CLIENT_ID in .env}
+      # Optional: User Pool JWKS for hosts without internet access (see .env.example)
+      COGNITO_JWKS: ${COGNITO_JWKS:-}
       # Microservices URLs (Docker service names)
       FONDOS_SERVICE_URL: http://fondos-service:8081
       INVERSIONES_SERVICE_URL: http://inversiones-service:8082

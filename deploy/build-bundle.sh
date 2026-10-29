@@ -7,6 +7,8 @@
 #
 # Uso:
 #   ./deploy/build-bundle.sh [linux/amd64|linux/arm64]   (por defecto linux/amd64, p. ej. t3.*)
+#   SOLO="bff-service" ./deploy/build-bundle.sh          paquete de actualización: solo esos
+#                                                         servicios, sin RabbitMQ (más liviano)
 #
 # Resultado: dist/bancocloud-backend-<commit>.tar y su .sha256. Sin secretos: el .env
 # se crea aparte en la EC2. Allí: tar -xf <paquete>, copiar el .env y
@@ -19,6 +21,10 @@ PLATFORM=${1:-linux/amd64}
 SERVICIOS=(usuarios-service fondos-service inversiones-service notificaciones-service
            rabbit-admin-service bff-service)
 RABBIT_IMAGE=rabbitmq:3.13-management
+SOLO=${SOLO:-}
+if [[ -n $SOLO ]]; then
+  read -ra SERVICIOS <<< "$SOLO"
+fi
 TAG=ep3
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -52,9 +58,11 @@ for s in "${SERVICIOS[@]}"; do
   ok "bancocloud/$s:$TAG"
 done
 
-docker pull --quiet --platform "$PLATFORM" "$RABBIT_IMAGE" >/dev/null
-IMAGENES+=("$RABBIT_IMAGE")
-ok "$RABBIT_IMAGE"
+if [[ -z $SOLO ]]; then
+  docker pull --quiet --platform "$PLATFORM" "$RABBIT_IMAGE" >/dev/null
+  IMAGENES+=("$RABBIT_IMAGE")
+  ok "$RABBIT_IMAGE"
+fi
 
 # Con el almacén containerd una etiqueta puede tener varias plataformas: se pide la de destino
 for imagen in "${IMAGENES[@]}"; do
@@ -71,12 +79,14 @@ docker save --platform "$PLATFORM" "${IMAGENES[@]}" | gzip -1 > "$PAQUETE/imagen
 cp docker-compose.yml docker-compose.aws.yml .env.example README.md "$PAQUETE/"
 cp deploy/ec2-deploy.sh deploy/e2e.sh "$PAQUETE/deploy/"
 cp scripts-sql/*.sql "$PAQUETE/scripts-sql/"
-printf 'commit=%s\nplataforma=%s\ncreado=%s\n' "$COMMIT" "$PLATFORM" "$(date -u +%FT%TZ)" > "$PAQUETE/VERSION"
+printf 'commit=%s\nplataforma=%s\nservicios=%s\ncreado=%s\n' \
+  "$COMMIT" "$PLATFORM" "${SOLO:-todos}" "$(date -u +%FT%TZ)" > "$PAQUETE/VERSION"
 
 mkdir -p dist
-# Las imágenes ya van comprimidas: el paquete exterior es un tar simple
-SALIDA="dist/bancocloud-backend-$COMMIT.tar"
-tar -C "$TRABAJO" -cf "$SALIDA" bancocloud-backend
+# Las imágenes ya van comprimidas: el paquete exterior es un tar simple.
+# Sin metadatos de macOS (xattrs), que el tar de Linux reporta como avisos.
+SALIDA="dist/bancocloud-backend-$COMMIT${SOLO:+-${SOLO// /-}}.tar"
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$TRABAJO" -cf "$SALIDA" bancocloud-backend
 (cd dist && shasum -a 256 "$(basename "$SALIDA")" > "$(basename "$SALIDA").sha256")
 
 ok "Paquete: $SALIDA ($(du -h "$SALIDA" | cut -f1))"

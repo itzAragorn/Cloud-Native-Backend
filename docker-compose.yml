@@ -25,7 +25,9 @@ services:
     networks:
       - bancocloud-network
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # The CLI runs as root: if it ran before the broker created its Erlang cookie, it would
+      # create one only root can read and the broker would fail to start
+      test: ["CMD-SHELL", "test -f /var/lib/rabbitmq/.erlang.cookie && rabbitmq-diagnostics -q ping"]
       timeout: 10s
       retries: 5
       interval: 15s

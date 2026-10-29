@@ -1,0 +1,63 @@
+# Ajustes para la EC2 (se usa junto con docker-compose.yml desde deploy/ec2-deploy.sh).
+#
+# - Imágenes con nombre fijo: las carga el paquete de deploy/build-bundle.sh o las
+#   construye "docker compose build" si el servidor tiene internet.
+# - Healthchecks con bash (/dev/tcp): las imágenes del paquete no traen curl.
+# - JVM acotada: los 7 contenedores usan ~1,1-1,5 GB medidos con esta configuración.
+
+x-jvm: &jvm
+  JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:+UseSerialGC -Xss512k -Xmx192m -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m}
+  # Limita los arenas de malloc de glibc, que inflan la memoria de la JVM en contenedores
+  MALLOC_ARENA_MAX: "2"
+
+x-health: &health
+  timeout: 10s
+  retries: 5
+  interval: 15s
+  start_period: 60s
+
+services:
+  usuarios-service:
+    image: bancocloud/usuarios-service:ep3
+    environment: *jvm
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8083 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  fondos-service:
+    image: bancocloud/fondos-service:ep3
+    environment: *jvm
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  inversiones-service:
+    image: bancocloud/inversiones-service:ep3
+    environment: *jvm
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  notificaciones-service:
+    image: bancocloud/notificaciones-service:ep3
+    environment: *jvm
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8084 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  rabbit-admin-service:
+    image: bancocloud/rabbit-admin-service:ep3
+    environment: *jvm
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8085 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+
+  bff-service:
+    image: bancocloud/bff-service:ep3
+    environment:
+      <<: *jvm
+      # Spring Security en DEBUG genera mucho log por petición; en la EC2 basta INFO
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: INFO
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /api/v1/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]

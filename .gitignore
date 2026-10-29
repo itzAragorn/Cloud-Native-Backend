@@ -40,6 +40,10 @@ dist/
 # Generated receipts (notificaciones-service local runs)
 data/
 
+# Offline deployment bundle (deploy/build-bundle.sh) and its marker on the EC2
+imagenes.tar.gz
+.imagenes-cargadas
+
 # Logs
 logs/
 *.log

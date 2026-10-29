@@ -130,6 +130,20 @@ cp .env.example .env && nano .env        # valores reales; RABBITMQ_HOST=rabbitm
 
 Para ver el estado usa `./deploy/ec2-deploy.sh estado` y, para revisar un servicio, `./deploy/ec2-deploy.sh logs <servicio>`. Antes de levantar nada, `desplegar` valida el `.env`: rechaza valores de ejemplo, la base en `localhost`, el usuario `guest` de RabbitMQ y la falta de una URL `https` en CORS.
 
+**EC2 sin salida a internet:** en lugar de compilar en la EC2, se arma un paquete con las imágenes y se lleva por S3, a través del endpoint Gateway de S3. Así no hace falta NAT.
+
+```bash
+# En una máquina con Docker (la EC2 t3.* es linux/amd64)
+./deploy/build-bundle.sh linux/amd64      # dist/bancocloud-backend-<commit>.tar (~470 MB) + .sha256
+
+# En la EC2, después de copiar el paquete desde S3
+tar -xf bancocloud-backend-<commit>.tar && cd bancocloud-backend
+cp <ruta>/.env .env
+./deploy/ec2-deploy.sh desplegar          # detecta imagenes.tar.gz: carga las imágenes y levanta sin internet
+```
+
+`docker-compose.aws.yml` acota la memoria de la JVM y reemplaza los healthchecks con `curl` por uno con bash, porque las imágenes del paquete solo traen el jar. Medido en Linux, los 7 contenedores ocupan entre 1,1 y 1,5 GB, así que la EC2 necesita al menos 2 GB de RAM.
+
 Para ver la consola de RabbitMQ sin abrir puertos, haz port forwarding de Session Manager al 15672 de la EC2:
 
 ```bash

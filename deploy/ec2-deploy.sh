@@ -7,9 +7,14 @@
 # Uso (desde la carpeta del repo, con EV1/.env completo):
 #   ./deploy/ec2-deploy.sh preparar     instala Docker, Compose, Buildx y swap (una vez)
 #   ./deploy/ec2-deploy.sh rds-init     crea las bases y el usuario de la app en RDS (una vez)
-#   ./deploy/ec2-deploy.sh desplegar    actualiza el código y levanta el backend
+#   ./deploy/ec2-deploy.sh desplegar    levanta el backend (ver abajo)
 #   ./deploy/ec2-deploy.sh estado       contenedores y salud
 #   ./deploy/ec2-deploy.sh logs [svc]   logs de un servicio (o de todos)
+#
+# desplegar tiene dos modos:
+#   - Con imagenes.tar.gz en la carpeta (paquete de deploy/build-bundle.sh): carga las
+#     imágenes y levanta sin compilar ni descargar nada. Para una EC2 sin internet.
+#   - Sin él: git pull (si es un clon) y build de las imágenes. Requiere internet.
 
 set -euo pipefail
 
@@ -26,7 +31,12 @@ ok()    { printf '\033[1;32m ✔\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m !\033[0m %s\n' "$*"; }
 fail()  { printf '\033[1;31m ✘\033[0m %s\n' "$*" >&2; exit 1; }
 
-compose() { docker compose -f "$REPO_DIR/docker-compose.yml" --project-directory "$REPO_DIR" "$@"; }
+PAQUETE_IMAGENES="$REPO_DIR/imagenes.tar.gz"
+
+compose() {
+  docker compose -f "$REPO_DIR/docker-compose.yml" -f "$REPO_DIR/docker-compose.aws.yml" \
+    --project-directory "$REPO_DIR" "$@"
+}
 
 env_value() { { grep -E "^$1=" "$ENV_FILE" || true; } | tail -1 | cut -d= -f2-; }
 
@@ -167,12 +177,21 @@ SQL
 desplegar() {
   validar_env
 
-  info "Actualizando código ($(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD))"
-  git -C "$REPO_DIR" pull --ff-only
-  ok "Commit $(git -C "$REPO_DIR" log -1 --format='%h %s')"
-
-  info "Construyendo y levantando el backend (la primera vez tarda 10-20 minutos)"
-  compose up -d --build --remove-orphans "${BACKEND_SERVICES[@]}"
+  if [[ -f $PAQUETE_IMAGENES ]]; then
+    cargar_paquete
+    info "Levantando el backend con las imágenes del paquete"
+    compose up -d --no-build --pull never --remove-orphans "${BACKEND_SERVICES[@]}"
+  else
+    if [[ -d $REPO_DIR/.git ]]; then
+      info "Actualizando código ($(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD))"
+      git -C "$REPO_DIR" pull --ff-only
+      ok "Commit $(git -C "$REPO_DIR" log -1 --format='%h %s')"
+    else
+      warn "La carpeta no es un clon de git: se usa el código tal como está"
+    fi
+    info "Construyendo y levantando el backend (la primera vez tarda 10-20 minutos)"
+    compose up -d --build --remove-orphans "${BACKEND_SERVICES[@]}"
+  fi
 
   # El BFF depende de todos los demás: cuando está healthy, el backend completo lo está
   info "Esperando a que el BFF esté healthy"
@@ -186,6 +205,34 @@ desplegar() {
   estado_servicios
   [[ $estado == healthy ]] || fail "El backend no quedó healthy; revisa: $0 logs <servicio>"
   ok "Backend desplegado. El ALB debe usar el health check /api/v1/health en el puerto 8090"
+}
+
+# Carga en Docker las imágenes del paquete, una sola vez por versión del paquete
+cargar_paquete() {
+  local version cargada
+  version=$(cat "$REPO_DIR/VERSION" 2>/dev/null | tr '\n' ' ')
+  cargada=$(cat "$REPO_DIR/.imagenes-cargadas" 2>/dev/null || true)
+  [[ -f $REPO_DIR/VERSION ]] && info "Paquete: $version"
+
+  if [[ $cargada == "$version" ]] && docker image inspect bancocloud/bff-service:ep3 >/dev/null 2>&1; then
+    ok "Imágenes de este paquete ya cargadas"
+    return
+  fi
+
+  # docker load descomprime: necesita ~2,5 veces el tamaño del archivo en el disco de Docker
+  local tamano necesario_mb raiz libre_mb
+  tamano=$(stat -c %s "$PAQUETE_IMAGENES" 2>/dev/null || stat -f %z "$PAQUETE_IMAGENES")
+  necesario_mb=$(( tamano * 5 / 2 / 1048576 ))
+  raiz=$(docker info -f '{{.DockerRootDir}}')
+  [[ -d $raiz ]] || raiz=/    # Docker Desktop: la raíz está dentro de su VM
+  libre_mb=$(df -Pm "$raiz" | awk 'NR == 2 {print $4}')
+  info "Disco libre para Docker: ${libre_mb} MB (se necesitan ~${necesario_mb} MB)"
+  [[ $libre_mb -ge $necesario_mb ]] || fail "No hay espacio suficiente: libera disco o amplía el volumen"
+
+  info "Cargando imágenes (unos minutos)"
+  docker load -i "$PAQUETE_IMAGENES"
+  echo "$version" > "$REPO_DIR/.imagenes-cargadas"
+  ok "Imágenes cargadas"
 }
 
 estado_servicios() {

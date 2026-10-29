@@ -1,0 +1,10 @@
+# Imagen de ejecución a partir de un jar ya compilado (deploy/build-bundle.sh).
+# No ejecuta comandos al construir: sirve para preparar imágenes de otra arquitectura
+# sin emulación y para servidores sin acceso a internet.
+FROM eclipse-temurin:17-jre
+
+ARG JAR
+WORKDIR /app
+COPY ${JAR} app.jar
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

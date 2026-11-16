@@ -525,6 +525,234 @@
           }
         }
       ]
+    },
+    {
+      "name": "ANALITICA SERVICE (8086) - Kafka",
+      "item": [
+        {
+          "name": "Resumen y ranking de fondos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8086/analitica/fondos/resumen",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8086",
+              "path": ["analitica", "fondos", "resumen"]
+            }
+          }
+        },
+        {
+          "name": "Historial del valor cuota",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8086/analitica/fondos/1/valor-cuota/historial",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8086",
+              "path": ["analitica", "fondos", "1", "valor-cuota", "historial"]
+            }
+          }
+        },
+        {
+          "name": "Inversiones diarias de un fondo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8086/analitica/fondos/1/inversiones/diario",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8086",
+              "path": ["analitica", "fondos", "1", "inversiones", "diario"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "KAFKA ADMIN SERVICE (8087)",
+      "item": [
+        {
+          "name": "Listar tópicos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8087/topics",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["topics"]
+            }
+          }
+        },
+        {
+          "name": "Detalle de tópico (particiones, ISR, configs)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8087/topics/bancocloud.inversiones.eventos",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["topics", "bancocloud.inversiones.eventos"]
+            }
+          }
+        },
+        {
+          "name": "Crear tópico",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8087/topics",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["topics"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"bancocloud.demo\",\n  \"partitions\": 3,\n  \"replicationFactor\": 3,\n  \"configs\": {\n    \"retention.ms\": \"86400000\",\n    \"cleanup.policy\": \"delete\",\n    \"min.insync.replicas\": \"2\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Modificar configuraciones",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8087/topics/bancocloud.demo/configs",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["topics", "bancocloud.demo", "configs"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"configs\": {\n    \"retention.ms\": \"3600000\",\n    \"cleanup.policy\": null\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Aumentar particiones",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8087/topics/bancocloud.demo/partitions",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["topics", "bancocloud.demo", "partitions"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"total\": 6\n}"
+            }
+          }
+        },
+        {
+          "name": "Eliminar tópico",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8087/topics/bancocloud.demo",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["topics", "bancocloud.demo"]
+            }
+          }
+        },
+        {
+          "name": "Listar consumer groups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8087/consumer-groups",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["consumer-groups"]
+            }
+          }
+        },
+        {
+          "name": "Detalle de grupo (miembros, offsets, lag)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8087/consumer-groups/analitica-inversiones",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["consumer-groups", "analitica-inversiones"]
+            }
+          }
+        },
+        {
+          "name": "Reset de offsets (grupo detenido)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:8087/consumer-groups/analitica-inversiones/reset-offsets",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["consumer-groups", "analitica-inversiones", "reset-offsets"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"topic\": \"bancocloud.inversiones.eventos\",\n  \"estrategia\": \"EARLIEST\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Eliminar grupo inactivo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8087/consumer-groups/grupo-viejo",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8087",
+              "path": ["consumer-groups", "grupo-viejo"]
+            }
+          }
+        }
+      ]
     }
   ]
 }

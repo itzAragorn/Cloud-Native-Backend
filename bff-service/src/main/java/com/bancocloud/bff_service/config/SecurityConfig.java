@@ -56,7 +56,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health")
                 .permitAll()
 
-                // Administración de RabbitMQ: además del @PreAuthorize del controlador
+                // Administración de RabbitMQ y Kafka: además del @PreAuthorize de cada controlador
                 .requestMatchers("/api/v1/admin/**")
                 .hasAuthority("ROLE_ADMIN")
 

@@ -1,0 +1,36 @@
+server:
+  port: 8087
+
+spring:
+  application:
+    name: kafka-admin-service
+
+  # Solo usa el AdminClient de Kafka: no produce ni consume mensajes de negocio
+  kafka:
+    # Los 3 brokers. En Docker: kafka-1:29092,kafka-2:29092,kafka-3:29092 (ver .env.example)
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    client-id: ${spring.application.name}
+    admin:
+      # Si el clúster no está arriba al arrancar, el servicio igual arranca y responde 503
+      fail-fast: false
+      auto-create: false
+      properties:
+        request.timeout.ms: 10000
+        default.api.timeout.ms: 15000
+
+app:
+  kafka-admin:
+    # Espera máxima por cada operación del AdminClient antes de responder 503
+    timeout-ms: 15000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    root: INFO
+    com.bancocloud.kafka_admin_service: DEBUG
+    org.apache.kafka: WARN

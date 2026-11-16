@@ -9,7 +9,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 		"DB_USERNAME=sa",
 		"DB_PASSWORD=",
 		"spring.datasource.driver-class-name=org.h2.Driver",
-		"spring.jpa.database-platform=org.hibernate.dialect.H2Dialect"
+		"spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
+		// No Kafka broker in the build: do not try to create the topics on startup
+		"spring.kafka.admin.auto-create=false"
 })
 class FondosServiceApplicationTests {
 

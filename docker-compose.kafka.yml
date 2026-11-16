@@ -1,0 +1,124 @@
+# Banco Cloud - Kafka con Zookeeper y 3 brokers.
+#
+# Se usa junto con docker-compose.yml (ver README). Solo Kafka:
+#   docker compose -f docker-compose.kafka.yml up -d
+#
+# Imágenes Confluent 7.9 (Apache Kafka 3.9): la última línea que todavía funciona con Zookeeper
+# (Kafka 4 lo eliminó y solo usa KRaft).
+#
+# Cada broker tiene dos listeners:
+#   INTERNAL  kafka-N:29092    para los contenedores (servicios, Kafka-UI) y entre brokers
+#   EXTERNAL  localhost:909N   para correr los servicios o herramientas en la máquina host
+# Los puertos externos quedan solo en 127.0.0.1: Kafka no queda expuesto a la red.
+
+x-kafka-broker: &kafka-broker
+  image: confluentinc/cp-kafka:7.9.11
+  depends_on:
+    zookeeper:
+      condition: service_healthy
+  networks:
+    - bancocloud-network
+  healthcheck:
+    test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 > /dev/null 2>&1"]
+    timeout: 20s
+    retries: 10
+    interval: 15s
+    start_period: 30s
+  restart: unless-stopped
+
+x-kafka-env: &kafka-env
+  KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  # Valores por defecto del clúster: 3 réplicas y 2 en sincronía para aceptar una escritura acks=all
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_NUM_PARTITIONS: 3
+  # Tópicos internos (offsets de los consumer groups, transacciones) también replicados en los 3
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  # Los tópicos se crean solo por código (NewTopic) o por kafka-admin-service / kafka-admin.sh
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  # Permite eliminar tópicos desde kafka-admin-service
+  KAFKA_DELETE_TOPIC_ENABLE: "true"
+  # Espera breve antes del primer reparto de particiones de un grupo nuevo
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 3000
+  # Memoria acotada: 3 brokers + Zookeeper comparten la máquina con los servicios
+  KAFKA_HEAP_OPTS: -Xmx256m -Xms256m
+  KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.11
+    hostname: zookeeper
+    container_name: bancocloud-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: -Xmx128m -Xms128m
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - bancocloud-network
+    healthcheck:
+      test: ["CMD-SHELL", "zookeeper-shell localhost:2181 ls / > /dev/null 2>&1"]
+      timeout: 10s
+      retries: 10
+      interval: 10s
+      start_period: 15s
+    restart: unless-stopped
+
+  kafka-1:
+    <<: *kafka-broker
+    hostname: kafka-1
+    container_name: bancocloud-kafka-1
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:29092,EXTERNAL://localhost:9092
+    ports:
+      - "127.0.0.1:9092:9092"
+    volumes:
+      - kafka-1-data:/var/lib/kafka/data
+
+  kafka-2:
+    <<: *kafka-broker
+    hostname: kafka-2
+    container_name: bancocloud-kafka-2
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 2
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:29092,EXTERNAL://localhost:9093
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+
+  kafka-3:
+    <<: *kafka-broker
+    hostname: kafka-3
+    container_name: bancocloud-kafka-3
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 3
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:29092,EXTERNAL://localhost:9094
+    ports:
+      - "127.0.0.1:9094:9094"
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+
+networks:
+  bancocloud-network:
+    driver: bridge
+
+volumes:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:

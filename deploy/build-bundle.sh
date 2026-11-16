@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Banco Cloud - arma un paquete del backend para una EC2 sin acceso a internet.
 #
-# Compila los 6 servicios, construye sus imágenes para la arquitectura de la EC2
-# (sin emulación: deploy/Dockerfile.runtime solo copia el jar), agrega RabbitMQ y
-# empaqueta imágenes + compose + scripts en un .tar.gz para subir a S3.
+# Compila los 8 servicios, construye sus imágenes para la arquitectura de la EC2
+# (sin emulación: deploy/Dockerfile.runtime solo copia el jar), agrega las imágenes de
+# RabbitMQ, Zookeeper, Kafka y Kafka-UI y empaqueta imágenes + compose + scripts en un
+# .tar para subir a S3.
 #
 # Uso:
 #   ./deploy/build-bundle.sh [linux/amd64|linux/arm64]   (por defecto linux/amd64, p. ej. t3.*)
 #   SOLO="bff-service" ./deploy/build-bundle.sh          paquete de actualización: solo esos
-#                                                         servicios, sin RabbitMQ (más liviano)
+#                                                         servicios, sin brokers (más liviano)
 #
 # Resultado: dist/bancocloud-backend-<commit>.tar y su .sha256. Sin secretos: el .env
 # se crea aparte en la EC2. Allí: tar -xf <paquete>, copiar el .env y
@@ -19,13 +20,15 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLATFORM=${1:-linux/amd64}
 SERVICIOS=(usuarios-service fondos-service inversiones-service notificaciones-service
-           rabbit-admin-service bff-service)
-RABBIT_IMAGE=rabbitmq:3.13-management
+           rabbit-admin-service analitica-service kafka-admin-service bff-service)
+# Imágenes de terceros: deben coincidir con docker-compose.rabbitmq.yml, .kafka.yml y .kafka-ui.yml
+BROKER_IMAGES=(rabbitmq:3.13-management confluentinc/cp-zookeeper:7.9.11
+               confluentinc/cp-kafka:7.9.11 kafbat/kafka-ui:v1.5.0)
 SOLO=${SOLO:-}
 if [[ -n $SOLO ]]; then
   read -ra SERVICIOS <<< "$SOLO"
 fi
-TAG=ep3
+TAG=ep5
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m ✔\033[0m %s\n' "$*"; }
@@ -39,7 +42,7 @@ TRABAJO=$(mktemp -d)
 trap 'rm -rf "$TRABAJO"' EXIT
 
 # ---------------------------------------------------------------- jars
-info "Compilando y probando los 6 servicios (commit $COMMIT)"
+info "Compilando y probando los ${#SERVICIOS[@]} servicios (commit $COMMIT)"
 for s in "${SERVICIOS[@]}"; do
   (cd "$s" && ./mvnw -q clean package) || fail "Falló el build de $s"
   ok "$s"
@@ -59,9 +62,11 @@ for s in "${SERVICIOS[@]}"; do
 done
 
 if [[ -z $SOLO ]]; then
-  docker pull --quiet --platform "$PLATFORM" "$RABBIT_IMAGE" >/dev/null
-  IMAGENES+=("$RABBIT_IMAGE")
-  ok "$RABBIT_IMAGE"
+  for imagen in "${BROKER_IMAGES[@]}"; do
+    docker pull --quiet --platform "$PLATFORM" "$imagen" >/dev/null
+    IMAGENES+=("$imagen")
+    ok "$imagen"
+  done
 fi
 
 # Con el almacén containerd una etiqueta puede tener varias plataformas: se pide la de destino
@@ -73,10 +78,13 @@ done
 # ---------------------------------------------------------------- paquete
 info "Exportando imágenes"
 PAQUETE="$TRABAJO/bancocloud-backend"
-mkdir -p "$PAQUETE/deploy" "$PAQUETE/scripts-sql"
+mkdir -p "$PAQUETE/deploy" "$PAQUETE/scripts-sql" "$PAQUETE/rabbitmq" "$PAQUETE/kafka/scripts"
 docker save --platform "$PLATFORM" "${IMAGENES[@]}" | gzip -1 > "$PAQUETE/imagenes.tar.gz"
 
-cp docker-compose.yml docker-compose.aws.yml .env.example README.md "$PAQUETE/"
+cp docker-compose.yml docker-compose.aws.yml docker-compose.rabbitmq.yml docker-compose.kafka.yml \
+   docker-compose.kafka-ui.yml .env.example README.md "$PAQUETE/"
+cp rabbitmq/rabbitmq.conf "$PAQUETE/rabbitmq/"
+cp kafka/scripts/kafka-admin.sh "$PAQUETE/kafka/scripts/"
 cp deploy/ec2-deploy.sh deploy/e2e.sh "$PAQUETE/deploy/"
 cp scripts-sql/*.sql "$PAQUETE/scripts-sql/"
 printf 'commit=%s\nplataforma=%s\nservicios=%s\ncreado=%s\n' \

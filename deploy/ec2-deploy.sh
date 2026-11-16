@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Banco Cloud - despliegue del backend en la EC2 (Amazon Linux 2023 o Ubuntu).
 #
-# En la EC2 corre solo el backend (RabbitMQ + 6 servicios). El frontend se publica
-# en S3/CloudFront con Cloud-Native-Front-end/scripts/deploy-s3.sh.
+# En la EC2 corre solo el backend: clúster RabbitMQ (3 nodos), Kafka (Zookeeper + 3 brokers),
+# Kafka-UI y 8 servicios. El frontend se publica en S3 con
+# Cloud-Native-Front-end/scripts/deploy-s3.sh.
 #
 # Uso (desde la carpeta del repo, con EV1/.env completo):
 #   ./deploy/ec2-deploy.sh preparar     instala Docker, Compose, Buildx y swap (una vez)
@@ -20,11 +21,12 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$REPO_DIR/.env"
-BACKEND_SERVICES=(rabbitmq usuarios-service fondos-service inversiones-service
-                  notificaciones-service rabbit-admin-service bff-service)
-REQUIRED_VARS=(USUARIOS_DB_URL FONDOS_DB_URL INVERSIONES_DB_URL DB_USERNAME DB_PASSWORD
+BACKEND_SERVICES=(rabbitmq-1 rabbitmq-2 rabbitmq-3 zookeeper kafka-1 kafka-2 kafka-3 kafka-ui
+                  usuarios-service fondos-service inversiones-service notificaciones-service
+                  rabbit-admin-service analitica-service kafka-admin-service bff-service)
+REQUIRED_VARS=(USUARIOS_DB_URL FONDOS_DB_URL INVERSIONES_DB_URL ANALITICA_DB_URL DB_USERNAME DB_PASSWORD
                COGNITO_ISSUER COGNITO_CLIENT_ID RABBITMQ_USERNAME RABBITMQ_PASSWORD
-               APP_CORS_ALLOWED_ORIGINS)
+               RABBITMQ_ERLANG_COOKIE APP_CORS_ALLOWED_ORIGINS)
 
 info()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()    { printf '\033[1;32m ✔\033[0m %s\n' "$*"; }
@@ -33,9 +35,12 @@ fail()  { printf '\033[1;31m ✘\033[0m %s\n' "$*" >&2; exit 1; }
 
 PAQUETE_IMAGENES="$REPO_DIR/imagenes.tar.gz"
 
+# Un solo proyecto Compose con los brokers y los servicios (mismo nombre de proyecto que en la EP3,
+# así el volumen comprobantes-data se conserva)
 compose() {
-  docker compose -f "$REPO_DIR/docker-compose.yml" -f "$REPO_DIR/docker-compose.aws.yml" \
-    --project-directory "$REPO_DIR" "$@"
+  docker compose -f "$REPO_DIR/docker-compose.rabbitmq.yml" -f "$REPO_DIR/docker-compose.kafka.yml" \
+    -f "$REPO_DIR/docker-compose.kafka-ui.yml" -f "$REPO_DIR/docker-compose.yml" \
+    -f "$REPO_DIR/docker-compose.aws.yml" --project-directory "$REPO_DIR" "$@"
 }
 
 env_value() { { grep -E "^$1=" "$ENV_FILE" || true; } | tail -1 | cut -d= -f2-; }
@@ -62,10 +67,11 @@ preparar() {
   ok "Docker $(sudo docker version --format '{{.Server.Version}}')"
   ok "$(sudo docker compose version)"
 
-  # 6 JVMs + RabbitMQ + build de Maven: con menos de ~6 GB de RAM hace falta swap
+  # 8 JVMs + 3 RabbitMQ + Zookeeper + 3 Kafka + Kafka-UI: con menos de ~10 GB de RAM,
+  # 2 GB de swap como margen ante picos
   local ram_mb
   ram_mb=$(free -m | awk '/^Mem:/ {print $2}')
-  if [[ $ram_mb -lt 6000 && ! -f /swapfile ]]; then
+  if [[ $ram_mb -lt 10000 && ! -f /swapfile ]]; then
     info "RAM ${ram_mb} MB: creando 2 GB de swap"
     sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
     sudo chmod 600 /swapfile
@@ -110,19 +116,22 @@ validar_env() {
     value=$(env_value "$var")
     if [[ -z $value ]]; then
       warn "$var está vacía"; errores=1
-    elif [[ $value == *PENDIENTE* || $value == *XXXXXXXXX* || $value == *your_* || $value == *'<rds-endpoint>'* ]]; then
+    elif [[ $value == *PENDIENTE* || $value == *XXXXXXXXX* || $value == *your_* || $value == *change_me* || $value == *'<rds-endpoint>'* ]]; then
       warn "$var todavía tiene un valor de ejemplo"; errores=1
     fi
   done
 
-  for var in USUARIOS_DB_URL FONDOS_DB_URL INVERSIONES_DB_URL; do
+  for var in USUARIOS_DB_URL FONDOS_DB_URL INVERSIONES_DB_URL ANALITICA_DB_URL; do
     if [[ $(env_value "$var") == *localhost* ]]; then
       warn "$var apunta a localhost, debe ser el endpoint de RDS"; errores=1
     fi
   done
 
-  if [[ $(env_value RABBITMQ_HOST) == localhost ]]; then
-    warn "RABBITMQ_HOST=localhost no funciona dentro de Docker (usa rabbitmq)"; errores=1
+  if [[ $(env_value RABBITMQ_ERLANG_COOKIE | tr -d "\n" | wc -c) -lt 20 ]]; then
+    warn "RABBITMQ_ERLANG_COOKIE debe tener al menos 20 caracteres (openssl rand -hex 24)"; errores=1
+  fi
+  if [[ $(env_value KAFKA_BOOTSTRAP_SERVERS) == *localhost* ]]; then
+    warn "KAFKA_BOOTSTRAP_SERVERS=localhost no funciona dentro de Docker (usa kafka-1:29092,...)"; errores=1
   fi
   if [[ $(env_value RABBITMQ_USERNAME) == guest ]]; then
     warn "El usuario guest de RabbitMQ solo acepta conexiones locales"; errores=1
@@ -164,6 +173,7 @@ ALTER USER '$app_user'@'%' IDENTIFIED BY '$pass_sql';
 GRANT ALL PRIVILEGES ON usuarios_db.* TO '$app_user'@'%';
 GRANT ALL PRIVILEGES ON fondos_db.* TO '$app_user'@'%';
 GRANT ALL PRIVILEGES ON inversiones_db.* TO '$app_user'@'%';
+GRANT ALL PRIVILEGES ON analitica_db.* TO '$app_user'@'%';
 SQL
   } | docker run --rm -i -e MYSQL_PWD="$master_pass" mysql:8.4 \
         mysql -h "$host" -P "$port" -u "$master" --connect-timeout=10
@@ -205,6 +215,11 @@ desplegar() {
   estado_servicios
   [[ $estado == healthy ]] || fail "El backend no quedó healthy; revisa: $0 logs <servicio>"
   ok "Backend desplegado. El ALB debe usar el health check /api/v1/health en el puerto 8090"
+  info "Clúster RabbitMQ:"
+  docker exec bancocloud-rabbitmq-1 rabbitmqctl cluster_status --formatter json 2>/dev/null \
+    | grep -o '"running_nodes":\[[^]]*\]' || warn "no se pudo leer cluster_status"
+  info "Brokers Kafka:"
+  "$REPO_DIR/kafka/scripts/kafka-admin.sh" brokers || warn "no se pudo consultar a los brokers"
 }
 
 # Carga en Docker las imágenes del paquete, una sola vez por versión del paquete
@@ -214,7 +229,7 @@ cargar_paquete() {
   cargada=$(cat "$REPO_DIR/.imagenes-cargadas" 2>/dev/null || true)
   [[ -f $REPO_DIR/VERSION ]] && info "Paquete: $version"
 
-  if [[ $cargada == "$version" ]] && docker image inspect bancocloud/bff-service:ep3 >/dev/null 2>&1; then
+  if [[ $cargada == "$version" ]] && docker image inspect bancocloud/bff-service:ep5 >/dev/null 2>&1; then
     ok "Imágenes de este paquete ya cargadas"
     return
   fi

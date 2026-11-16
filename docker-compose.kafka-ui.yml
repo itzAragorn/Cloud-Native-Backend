@@ -1,0 +1,35 @@
+# Banco Cloud - Kafka-UI para administrar brokers, tópicos, mensajes y consumer groups.
+#
+# Necesita los brokers de docker-compose.kafka.yml en el mismo proyecto (ver README):
+#   docker compose -f docker-compose.kafka.yml -f docker-compose.kafka-ui.yml up -d
+# Consola: http://localhost:8089 (solo desde esta máquina; en AWS por túnel de Session Manager).
+#
+# kafbat/kafka-ui es la continuación de provectuslabs/kafka-ui. Desde la v1 se conecta solo a los
+# brokers (ya no a Zookeeper), así que no lleva KAFKA_CLUSTERS_0_ZOOKEEPER.
+
+services:
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    container_name: bancocloud-kafka-ui
+    environment:
+      KAFKA_CLUSTERS_0_NAME: bancocloud
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      # La configuración de clústeres sale de estas variables, no se edita desde la interfaz
+      DYNAMIC_CONFIG_ENABLED: "false"
+      JAVA_OPTS: -Xmx256m
+    ports:
+      - "127.0.0.1:8089:8080"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    networks:
+      - bancocloud-network
+    restart: unless-stopped
+
+networks:
+  bancocloud-network:
+    driver: bridge

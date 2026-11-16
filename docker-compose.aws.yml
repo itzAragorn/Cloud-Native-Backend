@@ -16,7 +16,9 @@ x-health: &health
   timeout: 10s
   retries: 5
   interval: 15s
-  start_period: 60s
+  # Las 8 JVM arrancan a la vez en la t3.large: un servicio llegó a tardar 132 s en el primer
+  # despliegue de la EP5. Durante start_period los fallos no cuentan.
+  start_period: 180s
 
 services:
   usuarios-service:

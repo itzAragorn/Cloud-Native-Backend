@@ -158,8 +158,8 @@ rds_init() {
   app_pass=$(env_value DB_PASSWORD)
 
   info "RDS: $host:$port"
-  read -rp "Usuario maestro de RDS [admin]: " master
-  master=${master:-admin}
+  read -rp "Usuario maestro de RDS [bcadmin]: " master
+  master=${master:-bcadmin}
   read -rsp "Contraseña de $master: " master_pass; echo
 
   # La contraseña de la app va dentro de un literal SQL: se duplican las comillas simples
@@ -175,12 +175,21 @@ GRANT ALL PRIVILEGES ON fondos_db.* TO '$app_user'@'%';
 GRANT ALL PRIVILEGES ON inversiones_db.* TO '$app_user'@'%';
 GRANT ALL PRIVILEGES ON analitica_db.* TO '$app_user'@'%';
 SQL
-  } | docker run --rm -i -e MYSQL_PWD="$master_pass" mysql:8.4 \
-        mysql -h "$host" -P "$port" -u "$master" --connect-timeout=10
+  } | cliente_mysql "$master_pass" -h "$host" -P "$port" -u "$master" --connect-timeout=10
 
   ok "Bases y usuario $app_user listos. Comprobando acceso con el usuario de la app:"
-  docker run --rm -e MYSQL_PWD="$app_pass" mysql:8.4 \
-    mysql -h "$host" -P "$port" -u "$app_user" --connect-timeout=10 -e "SHOW DATABASES;"
+  cliente_mysql "$app_pass" -h "$host" -P "$port" -u "$app_user" --connect-timeout=10 -e "SHOW DATABASES;"
+}
+
+# Cliente mysql local si existe (la EC2 sin internet no puede descargar la imagen mysql:8.4);
+# si no, el de la imagen. Uso: cliente_mysql <contraseña> <argumentos de mysql...>
+cliente_mysql() {
+  local pass=$1; shift
+  if command -v mysql >/dev/null 2>&1; then
+    MYSQL_PWD="$pass" mysql "$@"
+  else
+    docker run --rm -i -e MYSQL_PWD="$pass" mysql:8.4 mysql "$@"
+  fi
 }
 
 # ---------------------------------------------------------------- desplegar

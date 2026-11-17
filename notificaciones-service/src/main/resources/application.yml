@@ -21,6 +21,40 @@ spring:
         # Safety net: anything rejected by the container goes to the DLQ, never back to the queue
         default-requeue-rejected: false
 
+  # Kafka (EP5): este servicio también lee el tópico de inversiones, con su propio consumer group
+  # (auditoria-inversiones), para dejar un registro de auditoría. RabbitMQ sigue igual.
+  kafka:
+    # Los 3 brokers. En Docker: kafka-1:29092,kafka-2:29092,kafka-3:29092 (ver .env.example)
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    client-id: ${spring.application.name}
+    consumer:
+      group-id: auditoria-inversiones
+      # La auditoría debe cubrir todo el historial retenido, también lo anterior al primer arranque
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Un JSON roto no detiene el consumidor: va al .DLT
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      max-poll-records: 100
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+        spring.json.trusted.packages: "com.bancocloud.*"
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.bancocloud.notificaciones_service.messaging.kafka.event.InversionRegistradaKafkaEvent
+        isolation.level: read_committed
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+    # Productor usado solo para enviar los mensajes fallidos al .DLT
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+    listener:
+      ack-mode: record
+      # Una hebra por partición del tópico de inversiones
+      concurrency: 3
+      missing-topics-fatal: false
+
 # Messaging names (read through RabbitMQProperties). DLQ names are derived as <queue>.dlq.
 app:
   rabbitmq:
@@ -40,6 +74,17 @@ app:
       usuario-registrado: usuario.registrado
       usuario-estado-pattern: usuario.estado.*
       valorcuota-actualizado: fondo.valorcuota.actualizado
+  kafka:
+    topics:
+      inversiones: bancocloud.inversiones.eventos
+    dlt-suffix: .DLT
+    groups:
+      # Distinto de analitica-inversiones: ambos grupos reciben todos los eventos del tópico
+      auditoria-inversiones: auditoria-inversiones
+    reintentos:
+      max-intentos: 3
+      intervalo-inicial-ms: 1000
+      multiplicador: 2.0
   comprobantes:
     directorio: ${COMPROBANTES_DIR:./data/comprobantes}
 

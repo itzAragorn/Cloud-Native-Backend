@@ -49,6 +49,35 @@ spring:
     template:
       mandatory: true
 
+  # Kafka (EP5): streaming de eventos para analítica. RabbitMQ sigue a cargo de los comprobantes.
+  # Este servicio solo produce; los consumidores están en analitica-service y notificaciones-service.
+  kafka:
+    # Los 3 brokers: si uno cae, el cliente sigue descubriendo el clúster por los otros dos.
+    # En Docker: kafka-1:29092,kafka-2:29092,kafka-3:29092 (ver .env.example)
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    client-id: ${spring.application.name}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Serializer JSON vigente de Spring Kafka 4 (Jackson 3); JsonSerializer está deprecado
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      # all + min.insync.replicas=2: la inversión se confirma solo cuando 2 de 3 réplicas la tienen
+      acks: all
+      retries: 3
+      properties:
+        # Sin duplicados por reintentos y sin desorden dentro de la partición (por usuarioId)
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # Agrupa mensajes 5 ms para mandar lotes; lz4 comprime con poco CPU
+        linger.ms: 5
+        compression.type: lz4
+        # Si Kafka no responde, send() no debe retener la respuesta HTTP más de 5 s
+        # (el valor por defecto es 60 s). Igual que connection-timeout de RabbitMQ.
+        max.block.ms: 5000
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 30000
+        # El consumidor conoce el tipo por configuración; no se mandan clases Java en headers
+        spring.json.add.type.headers: false
+
 # Messaging names for the inversiones domain (read through RabbitMQProperties).
 # DLQ names are derived as <queue>.dlq.
 app:
@@ -60,6 +89,28 @@ app:
       comprobante: inversiones.comprobante.q
     routing-keys:
       inversion-creada: inversion.creada
+
+  # Tópicos de Kafka que este servicio declara (dueño del tópico). Leídos por BancoKafkaProperties.
+  kafka:
+    topics:
+      inversiones:
+        name: bancocloud.inversiones.eventos
+        # 3 particiones = 3 consumidores en paralelo por grupo. Key = usuarioId, así las
+        # inversiones de un mismo usuario quedan en orden dentro de su partición.
+        partitions: 3
+        # 3 réplicas (una por broker) y min.insync 2: tolera la caída de un broker sin perder
+        # ni dejar de aceptar escrituras con acks=all.
+        replicas: 3
+        min-insync-replicas: 2
+        # Historial de transacciones: cada evento importa, no se compacta. 7 días alcanzan para
+        # reprocesar (releer desde earliest) si analítica falla, sin crecer sin límite.
+        cleanup-policy: delete
+        retention-ms: 604800000
+    dlt:
+      # Tópico de errores: <tópico>.DLT, mismas particiones (el mensaje vuelve a la misma
+      # partición) y réplicas. 14 días para revisar y reprocesar los mensajes fallidos.
+      suffix: .DLT
+      retention-ms: 1209600000
 
 management:
   health:

@@ -1,0 +1,98 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: analitica-service
+
+  # Métricas de analítica en MySQL (AWS RDS). Variables obligatorias, sin valores por defecto.
+  datasource:
+    url: ${ANALITICA_DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-timeout: 20000
+      # Hasta 3 hebras por grupo (concurrency 3) x 2 grupos + endpoints de lectura
+      maximum-pool-size: 8
+
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    open-in-view: false
+
+  # Kafka: solo consume. Cada tópico tiene su propia ContainerFactory (KafkaConsumerConfig)
+  # porque cada uno se deserializa a un DTO distinto; esta sección es la base común.
+  kafka:
+    # Los 3 brokers. En Docker: kafka-1:29092,kafka-2:29092,kafka-3:29092 (ver .env.example)
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    client-id: ${spring.application.name}
+    consumer:
+      # Grupo por defecto; cada @KafkaListener declara el suyo (app.kafka.groups)
+      group-id: analitica
+      # Un grupo nuevo lee el historial completo retenido (7 / 30 días) y arma las métricas
+      auto-offset-reset: earliest
+      # El contenedor confirma el offset recién cuando el listener terminó (ack-mode record)
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ErrorHandlingDeserializer envuelve al JSON: un mensaje roto no detiene el consumidor,
+      # se convierte en DeserializationException y va directo al .DLT
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      # Lotes chicos: cada mensaje escribe en MySQL; con 50 el poll cabe holgado en max.poll.interval
+      max-poll-records: 50
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+        spring.json.trusted.packages: "com.bancocloud.*"
+        # Los productores no mandan headers de tipo; el DTO lo fija cada ContainerFactory
+        spring.json.use.type.headers: false
+        # Solo lee mensajes confirmados (si un productor llegara a usar transacciones)
+        isolation.level: read_committed
+        # Reparto de particiones sin "stop the world" cuando entra o sale una instancia
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+    # Productor usado solo para enviar los mensajes fallidos al .DLT
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+    listener:
+      # Confirma cada mensaje después de procesarlo: si el servicio cae, a lo más se reprocesa
+      # uno, y el eventId ya guardado lo descarta (idempotencia)
+      ack-mode: record
+      # Una hebra por partición: 3 particiones -> 3 hebras por grupo
+      concurrency: 3
+      # Si un tópico aún no existe (el productor lo crea al arrancar) el servicio igual arranca
+      missing-topics-fatal: false
+
+# Nombres de tópicos y consumer groups (leídos por BancoKafkaProperties)
+app:
+  kafka:
+    topics:
+      inversiones: bancocloud.inversiones.eventos
+      valor-cuota: bancocloud.fondos.valorcuota
+    dlt-suffix: .DLT
+    groups:
+      # Grupos distintos por responsabilidad. notificaciones-service lee el mismo tópico de
+      # inversiones con su propio grupo (auditoria-inversiones) y recibe también todos los eventos.
+      analitica-inversiones: analitica-inversiones
+      analitica-fondos: analitica-fondos
+      analitica-dlt: analitica-dlt
+    # Reintentos ante errores transitorios (BD caída): 1 s, 2 s, 4 s y luego al .DLT
+    reintentos:
+      max-intentos: 3
+      intervalo-inicial-ms: 1000
+      multiplicador: 2.0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    root: INFO
+    com.bancocloud.analitica_service: DEBUG
+    org.apache.kafka: WARN

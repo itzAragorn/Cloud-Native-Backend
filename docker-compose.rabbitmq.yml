@@ -1,0 +1,74 @@
+# Banco Cloud - clúster RabbitMQ de 3 nodos.
+#
+# Se usa junto con docker-compose.yml (ver README):
+#   docker compose -f docker-compose.rabbitmq.yml -f docker-compose.kafka.yml \
+#     -f docker-compose.kafka-ui.yml -f docker-compose.yml up -d --build
+# Solo el clúster:  docker compose -f docker-compose.rabbitmq.yml up -d
+# Comprobar:        docker exec bancocloud-rabbitmq-1 rabbitmqctl cluster_status
+#
+# Los servicios se conectan a los 3 nodos (SPRING_RABBITMQ_ADDRESSES en docker-compose.yml): si uno
+# cae, el cliente se reconecta a otro. Las colas siguen siendo clásicas, como en la EP3: cada una vive
+# en el nodo donde se declaró (cambiar a quorum queues implica redeclararlas).
+
+x-rabbitmq-node: &rabbitmq-node
+  image: rabbitmq:3.13-management
+  environment:
+    RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?define RABBITMQ_USERNAME in .env}
+    RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?define RABBITMQ_PASSWORD in .env}
+    # Misma cookie de Erlang en los 3 nodos: es la credencial con que los nodos se reconocen entre sí
+    RABBITMQ_CLUSTER_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?define RABBITMQ_ERLANG_COOKIE in .env}
+  # Escribe la cookie antes de arrancar (la variable RABBITMQ_ERLANG_COOKIE de la imagen está deprecada)
+  entrypoint:
+    - bash
+    - -c
+    - |
+      umask 077
+      printf '%s' "$$RABBITMQ_CLUSTER_COOKIE" > /var/lib/rabbitmq/.erlang.cookie
+      chown rabbitmq:rabbitmq /var/lib/rabbitmq/.erlang.cookie
+      exec docker-entrypoint.sh rabbitmq-server
+  networks:
+    - bancocloud-network
+  healthcheck:
+    test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+    timeout: 10s
+    retries: 10
+    interval: 15s
+    start_period: 30s
+  restart: unless-stopped
+
+services:
+  rabbitmq-1:
+    <<: *rabbitmq-node
+    hostname: rabbitmq-1
+    container_name: bancocloud-rabbitmq-1
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro
+      - rabbitmq-1-data:/var/lib/rabbitmq
+    ports:
+      # Consola de administración, solo desde esta máquina (en AWS, por túnel de Session Manager)
+      - "127.0.0.1:15672:15672"
+
+  rabbitmq-2:
+    <<: *rabbitmq-node
+    hostname: rabbitmq-2
+    container_name: bancocloud-rabbitmq-2
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro
+      - rabbitmq-2-data:/var/lib/rabbitmq
+
+  rabbitmq-3:
+    <<: *rabbitmq-node
+    hostname: rabbitmq-3
+    container_name: bancocloud-rabbitmq-3
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro
+      - rabbitmq-3-data:/var/lib/rabbitmq
+
+networks:
+  bancocloud-network:
+    driver: bridge
+
+volumes:
+  rabbitmq-1-data:
+  rabbitmq-2-data:
+  rabbitmq-3-data:

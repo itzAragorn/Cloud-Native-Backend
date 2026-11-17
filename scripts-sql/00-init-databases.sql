@@ -1,4 +1,4 @@
--- Banco Cloud - crea las tres bases de datos en la instancia RDS.
+-- Banco Cloud - crea las cuatro bases de datos en la instancia RDS.
 -- Las tablas las crea Hibernate (spring.jpa.hibernate.ddl-auto=update)
 -- la primera vez que arranca cada microservicio.
 --
@@ -7,3 +7,5 @@
 CREATE DATABASE IF NOT EXISTS usuarios_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS fondos_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS inversiones_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- EP5: métricas de analitica-service (consumidor de Kafka)
+CREATE DATABASE IF NOT EXISTS analitica_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

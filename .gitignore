@@ -51,3 +51,6 @@ logs/
 
 # Docker
 .dockerignore
+
+# Compiled classes outside target/
+*.class
